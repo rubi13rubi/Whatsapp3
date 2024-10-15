@@ -14,7 +14,11 @@ The folder also contains the requirements file, so you can install python depend
 ```
 pip install -r requirements.txt
 ```
-If you find an error or your distribution does not recommend using pip, you can use the **python virtual environment** included on the server folder (only works in Linux). It includes all requirements already installed for both the server and the client. To use the virtual environment when executing your files, you need to execute the python binary of the venv instead of the one in your system. Simply replace `python3` with `wpp3venv/bin/python3`
+If you find an error or your distribution does not recommend using pip, you can use a **python virtual environment**. To create a virtual environment open use `python -m venv wpp3venv`. Then you should be able to install the requirements with the pip from the virtual environment using
+```
+wpp3venv/bin/pip install -r requirements.txt
+```
+To use the virtual environment when executing your files, you need to execute the python binary of the venv instead of the one in your system. Simply replace `python3` with `wpp3venv/bin/python3`
 
 
 ## Server setup and usage
@@ -46,7 +50,7 @@ Alternatively, you can also download the source and run it with python. This can
 ```
 pip install -r requirements.txt
 ```
-If installing dependencies fails, you can also use the virtual environment included on the server folder. Note that the virtual environment will only work on Linux. It contains all dependencies for both the client and the server. Just copy the wpp3venv folder from the server folder to the client folder. Then you will be able to run the client file file replacing `python3` with `wpp3venv/bin/python3`
+If installing dependencies fails, you can also use a python virtual environment. The process of creating a virtual environment is already described in the server installing section. Follow the same steps and you will be able to run the client file file replacing `python3` with `wpp3venv/bin/python3`
 
 ## Client setup and usage
 
