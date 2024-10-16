@@ -1,2 +1,2 @@
-numpy==1.24.4
-opuslib==3.0.1
+numpy
+opuslib

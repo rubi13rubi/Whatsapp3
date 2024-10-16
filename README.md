@@ -9,13 +9,15 @@ The project consists on a console-based server and an interface-based client. On
 ## Server installing
 
 The server is designed to run on a linux or windows machine. There is not a binary for the server as it can be interpreted with python, but **there is a server folder on each release version src directory** with the server version that will work best with that client release. Using different server and client versions can cause issues.
-To avoid having issues with the opus library (which requires additional files to work), **copy the entire folder and not only the python file**. The folder contains all the opus files for windows (.dll) and must be kept always with the server file itself. Linux does not require the .dll files.
+To avoid having issues with the opus library (which requires additional files to work), **copy the entire folder and not only the python file**. The folder contains all the opus files for Windows (.dll) and Linux (.a) and must be kept always with the server file itself. Some linux distributions may not require the .a files as they are already installed.
 The folder also contains the requirements file, so you can install python dependencies using:
 ```
+pip install --update pip
 pip install -r requirements.txt
 ```
-If you find an error or your distribution does not recommend using pip, you can use a **python virtual environment**. To create a virtual environment open use `python -m venv wpp3venv`. Then you should be able to install the requirements with the pip from the virtual environment using
+If you find an error or your distribution does not recommend using pip, you can use a **python virtual environment**. To create a virtual environment open use `python3 -m venv wpp3venv`. Then you should be able to install the requirements with the pip from the virtual environment using
 ```
+wpp3venv/bin/pip install --update pip
 wpp3venv/bin/pip install -r requirements.txt
 ```
 To use the virtual environment when executing your files, you need to execute the python binary of the venv instead of the one in your system. Simply replace `python3` with `wpp3venv/bin/python3`
@@ -48,6 +50,7 @@ The client has been tested on Windows, and **.exe files are included on releases
 
 Alternatively, you can also download the source and run it with python. This can be used to run the client on Linux, although you will have some issues with the interface and the audio quality will be worse. If you want to do this, you will have to download the full client folder from src, as it includes all the necessary files that are normally packed in the .exe. Also, you will need to install the requirements opening a terminal on the client folder and running:
 ```
+pip install --update pip
 pip install -r requirements.txt
 ```
 If installing dependencies fails, you can also use a python virtual environment. The process of creating a virtual environment is already described in the server installing section. Follow the same steps and you will be able to run the client file file replacing `python3` with `wpp3venv/bin/python3`
@@ -78,10 +81,10 @@ However, it is **reasonable not to trust** random executables downloaded from th
 The steps shown below apply for Windows, but they should work (although it has not been tested) to generate a Linux executable. Linux does not require the .dll files to be included.
 
 1. **Find the source code** of the the release you want to build. It should be in `src/client`. To compile it you need the full folder as it includes files that will be packed with the executable.
-2. **Check the code** with a code editor to find any potential malware. Also, you can download the three .dll files from the original repository, listed in credits section (you will have to rename the "libopus-o.dll" to "opus.dll").
+2. **Check the code** with a code editor to find any potential malware. Also, you can download the three .dll or .a files from the original repository, listed in credits section (you will have to rename the "libopus-o.dll" to "opus.dll").
 3. **Turn off your antivirus** or add the client folder to exceptions. This will avoid the process being stopped before it even being fully compiled.
 4. **Open a terminal** on the client folder you downloaded.
-5. **Run the following command**
+5. Install pyinstalles package and **run the following command**
 ```
 pyinstaller --onefile --noconsole whatsapp3.py
 ```
