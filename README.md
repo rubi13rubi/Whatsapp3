@@ -9,7 +9,7 @@ The project consists on a console-based server and an interface-based client. On
 ## Server installing
 
 The server is designed to run on a linux or windows machine. There is not a binary for the server as it can be interpreted with python, but **there is a server folder on each release version src directory** with the server version that will work best with that client release. Using different server and client versions can cause issues.
-To avoid having issues with the opus library (which requires additional files to work), **copy the entire folder and not only the python file**. The folder contains all the opus files for Windows (.dll) and Linux (.a) and must be kept always with the server file itself. Some linux distributions may not require the .a files as they are already installed.
+To avoid having issues with the opus library (which requires additional files to work), **copy the entire folder and not only the python file**. The folder contains all the opus files for Windows (.dll) and must be kept always with the server file itself.
 The folder also contains the requirements file, so you can install python dependencies using:
 ```
 pip install --update pip
@@ -29,6 +29,7 @@ Once the server folder is installed, you can start it opening a terminal on the 
 ```
 python3 whatsapp3_server.py
 ```
+If you get the error "Could not find Opus library. Make sure it is installed" check the section below for Opus errors.
 If it is your first time using the client, it will generate a **settings.json** file with the default settings and stop the program. Before running the program again, open the settings file to configure all the parameters:
 ```
 nano settings.json
@@ -74,6 +75,22 @@ If everything worked, you should see another interface with box where all messag
 - To **download a file** sent by another user, double click the message of the file. You will be prompted with a window asking where would you like to save the file and the name of it. Once you select it you will start downloading the file. Do not try to open the file or disconnect from the server until you see a confirmation message saying your file has been downloaded.
 - To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own value. To mute or unmute your microphone, type "/mute". To leave the voice chat, type "/voice" again.
 
+## Opus error
+
+When executing either the client or the server from source, you may get the error "Could not find Opus library. Make sure it is installed". This is because Opus library is a system library and the python package only connects the system library with Python so you can use it in the code. For the library to work you need to have the library installed on your system.
+
+### Windows
+
+If you get the error on Windows, check if you have the .dll files on the same folder as the python file. These files are the system library and Windows needs to find them for the Python library to work.
+You should never get the error on the executable as it is packed with the library inside. However, if you have compiled your own executable, you may not have packed the libraries. Check the next section to compile your .exe correctly.
+
+### Linux
+
+Linux does not require the .dll files, and some distributions already have the library installed on the system. However, if you get the error, you need to manually install it using a package manager, for example:
+```
+sudo yum install opus
+```
+
 ## About virus/malware detection. Compile the source yourself
 
 Some antivirus, including windows defender will detect the .exe file as malware and warn about it or delete the file completely. This is due to the file not being signed, the console being hidden and the code containing network interactions that are usually found in malware. The file is completely safe and you can just allow it on your antivirus, click ok on the warnings, and allow it through the firewall.
@@ -81,7 +98,7 @@ However, it is **reasonable not to trust** random executables downloaded from th
 The steps shown below apply for Windows, but they should work (although it has not been tested) to generate a Linux executable. Linux does not require the .dll files to be included.
 
 1. **Find the source code** of the the release you want to build. It should be in `src/client`. To compile it you need the full folder as it includes files that will be packed with the executable.
-2. **Check the code** with a code editor to find any potential malware. Also, you can download the three .dll or .a files from the original repository, listed in credits section (you will have to rename the "libopus-o.dll" to "opus.dll").
+2. **Check the code** with a code editor to find any potential malware. Also, you can download the three .dll files from the original repository, listed in credits section (you will have to rename the "libopus-o.dll" to "opus.dll").
 3. **Turn off your antivirus** or add the client folder to exceptions. This will avoid the process being stopped before it even being fully compiled.
 4. **Open a terminal** on the client folder you downloaded.
 5. Install pyinstalles package and **run the following command**
