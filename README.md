@@ -30,9 +30,9 @@ Once the server folder is installed, you can start it opening a terminal on the 
 python3 whatsapp3_server.py
 ```
 If you get the error "Could not find Opus library. Make sure it is installed" check the section below for Opus errors.
-If it is your first time using the client, it will generate a **settings.json** file with the default settings and stop the program. Before running the program again, open the settings file to configure all the parameters:
+If it is your first time using the client, it will generate a **config.json** file with the default settings and stop the program. Before running the program again, open the config file to configure all the parameters:
 ```
-nano settings.json
+nano config.json
 ```
 1. Change **ip** to the private ip of your machine. If you do not know it you can use ifconfig or ipconfig (depending on your os).
 
