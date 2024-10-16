@@ -4,6 +4,13 @@
 import os
 try: os.add_dll_directory(os.getcwd()) #add working directory to find dll
 except: pass #not windows
+try:
+    working_dir = os.getcwd()
+    ld_library_path = os.environ.get('LD_LIBRARY_PATH', '') #get current LD_LIBRARY_PATH
+    if working_dir not in ld_library_path:
+        os.environ['LD_LIBRARY_PATH'] = working_dir + ':' + ld_library_path #add working directory to LD_LIBRARY_PATH
+    os.system('ldconfig') #update LD_LIBRARY_PATH
+except: pass #not linux
 import time
 import socket
 import json
