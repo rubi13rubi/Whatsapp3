@@ -12,12 +12,12 @@ The server is designed to run on a linux or windows machine. There is not a bina
 To avoid having issues with the opus library (which requires additional files to work), **copy the entire folder and not only the python file**. The folder contains all the opus files for Windows (.dll) and must be kept always with the server file itself.
 The folder also contains the requirements file, so you can install python dependencies using:
 ```
-pip install --update pip
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 If you find an error or your distribution does not recommend using pip, you can use a **python virtual environment**. To create a virtual environment open use `python3 -m venv wpp3venv`. Then you should be able to install the requirements with the pip from the virtual environment using
 ```
-wpp3venv/bin/pip install --update pip
+wpp3venv/bin/pip install --upgrade pip
 wpp3venv/bin/pip install -r requirements.txt
 ```
 To use the virtual environment when executing your files, you need to execute the python binary of the venv instead of the one in your system. Simply replace `python3` with `wpp3venv/bin/python3`
@@ -51,7 +51,7 @@ The client has been tested on Windows, and **.exe files are included on releases
 
 Alternatively, you can also download the source and run it with python. This can be used to run the client on Linux, although you will have some issues with the interface and the audio quality will be worse. If you want to do this, you will have to download the full client folder from src, as it includes all the necessary files that are normally packed in the .exe. Also, you will need to install the requirements opening a terminal on the client folder and running:
 ```
-pip install --update pip
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 If installing dependencies fails, you can also use a python virtual environment. The process of creating a virtual environment is already described in the server installing section. Follow the same steps and you will be able to run the client file file replacing `python3` with `wpp3venv/bin/python3`
