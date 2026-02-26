@@ -34,21 +34,40 @@ def send_message(message):
     global gain
     if message.startswith("/voice"):
         global voice_socket
+        global voiceret_socket
         message = "/voice"
         if voice_enabled:
             voice_enabled = False
             message_list.insert(END, "Voice chat disabled")
+            addr = voice_socket.getsockname()
+            retaddr = voiceret_socket.getsockname()
+            try: 
+                voice_socket.close()
+                voiceret_socket.close()
+            except: pass
         else:
             voice_enabled = True
             message_list.insert(END, "Voice chat enabled")
-            voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
             ip = server_socket.getsockname()[0]
+
+            voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for sending voice data
+            voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
+            voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
             voice_socket.bind((ip, 0)) # Bind to a random port
+
+            voiceret_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for receiving voice data
+            voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
+            voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
+            voiceret_socket.bind((ip, 0)) # Bind to a random port
+
             threading.Thread(target=voice_rcv_loop).start()
             threading.Thread(target=voice_send_loop).start()
             threading.Thread(target=voice_play_loop).start()
-        addr = voice_socket.getsockname()
-        message += " " + str(addr[1]) # Send the port
+            addr = voice_socket.getsockname()
+            retaddr = voiceret_socket.getsockname()
+            #print ("Retaddr " + str(retaddr))
+        message += " " + str(addr[1]) + " " + str(retaddr[1]) # Send the ports to the server
     elif message == "/mute":
         global muted
         if voice_enabled:
@@ -166,6 +185,7 @@ def stop_program():
     global stop_program_flag
     stop_program_flag = True
     root.destroy()
+    audio.terminate()
     exit()
 
 def receive_message_loop():
@@ -181,21 +201,23 @@ def receive_message_loop():
 def voice_rcv_loop():
     global stop_program_flag
     global voice_enabled
-    global voiceaddr
-    global voice_socket
+    global voiceretaddr
+    global voiceret_socket
     global jitter_buffer
     global buffer_state
-    
     while voice_enabled and not stop_program_flag:
         try:
-            data, addr = voice_socket.recvfrom(4096)
-            decoded_frame = decoder.decode(data, CHUNK)
-            jitter_buffer.append(decoded_frame)
-            # Buffer state management when filling, management when emptying is done in the play loop
-            if buffer_state == BUFFER_WAIT_FILL and len(jitter_buffer) >= JITTER_BUFFER_OPTIMAL:
-                buffer_state = BUFFER_RUNNING
-            elif len(jitter_buffer) >= JITTER_BUFFER_MAX:
-                buffer_state = BUFFER_WAIT_DRAIN
+            data, addr = voiceret_socket.recvfrom(4096)
+            #print("Received voice data from " + str(addr))
+            #print("Expected voice data from " + str(voiceretaddr))
+            if addr == voiceretaddr:
+                decoded_frame = decoder.decode(data, CHUNK)
+                jitter_buffer.append(decoded_frame)
+                # Buffer state management when filling, management when emptying is done in the play loop
+                if buffer_state == BUFFER_WAIT_FILL and len(jitter_buffer) >= JITTER_BUFFER_OPTIMAL:
+                    buffer_state = BUFFER_RUNNING
+                elif len(jitter_buffer) >= JITTER_BUFFER_MAX:
+                    buffer_state = BUFFER_WAIT_DRAIN
         except: pass
 
 def voice_play_loop():
@@ -207,6 +229,7 @@ def voice_play_loop():
     while voice_enabled and not stop_program_flag:
         start_time = time.time()
         try:
+            #print(buffer_state)
             if len(jitter_buffer) == 0:
                 buffer_state = BUFFER_WAIT_FILL
             if buffer_state == BUFFER_WAIT_FILL: # If buffer is too empty, play silence
@@ -362,6 +385,7 @@ def create_chat(ip, port, name, user):
     global message_thread
     global voice_enabled
     global voiceaddr
+    global voiceretaddr
     global muted
 
     try: root.destroy()
@@ -373,6 +397,9 @@ def create_chat(ip, port, name, user):
     root.grid_columnconfigure(0, weight=1)
     root.title("Whatsapp 3: Chat with " + name)
     root.protocol("WM_DELETE_WINDOW", stop_chat)
+
+    #Resolve the IP address in case it is a domain name
+    ip = socket.gethostbyname(ip)
 
     # Message frame and scroll setup
     message_frame = ttk.Frame(root)
@@ -407,11 +434,14 @@ def create_chat(ip, port, name, user):
         server_socket.send("Sync".encode())
         voiceport = server_socket.recv(1024).decode()
         server_socket.send("Sync".encode())
+        voiceretport = server_socket.recv(1024).decode()
+        server_socket.send("Sync".encode())
     except: receive_message("Error connecting to server")
     server_socket.settimeout(None)
     voice_enabled = False
     muted = False
     voiceaddr = (ip, int(voiceport))
+    voiceretaddr = (ip, int(voiceretport))
     #Threads and loops
     message_thread = threading.Thread(target=receive_message_loop)
     message_thread.start()
@@ -430,7 +460,7 @@ def test_audio():
 #Root window setup and audio init
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 16000 # 16000 Hz
+RATE = 16000 # 16000 Hz (samples per second)
 CHUNK = 320 # 320 samples per frame (640 bytes), 20 ms per frame
 #jitter buffer parameters
 JITTER_BUFFER_OPTIMAL = 4

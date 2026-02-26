@@ -1,0 +1,10 @@
+# Config, data and log files
+src/client/server_list.json
+src/server/data
+src/server/log.txt
+src/server/config.json
+
+# Build files
+src/client/build
+src/client/dist
+src/client/whatsapp3.spec

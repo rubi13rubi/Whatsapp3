@@ -28,7 +28,7 @@ def accept_file_connections():
             client.settimeout(1)
             data = client.recv(1024).decode()
             client.settimeout(None)
-            if data != "WSP3":
+            if data != "WSP3": #code sent by client to identify itself as WSP3 client
                 client.close()
                 print("Ignoring non-WSP3 connection on file server")
                 log("Ignoring non-WSP3 connection on file server")
@@ -124,7 +124,7 @@ def accept_connections():
             #check data availability with timeout
             client.settimeout(1)
             data = client.recv(1024).decode()
-            if data != "WSP3":
+            if data != "WSP3": #code sent by client to identify itself as WSP3 client
                 client.close()
                 print("Ignoring non-WSP3 connection")
                 log("Ignoring non-WSP3 connection")
@@ -134,6 +134,8 @@ def accept_connections():
                 client.send(fileport.encode())
                 client.recv(1024) # Sync
                 client.send(voiceport.encode())
+                client.recv(1024) # Sync
+                client.send(voiceretport.encode())
                 client.recv(1024) # Sync
                 print("Connected to", username)
                 log("Connected to " + username)
@@ -155,16 +157,24 @@ def receive_message_loop(client, username, addr):
             if message.decode().startswith("/voice"):
                 ip = addr[0]
                 port = int(message.decode().split(" ")[1])
+                retport = int(message.decode().split(" ")[2])
                 addr = (ip, port)
+                retaddr = (ip, retport)
                 if addr not in voice_clients:
                     jitter_buffers[addr] = deque() #create buffer for client if it doesn't exist
                     buffer_states[addr] = BUFFER_WAIT_FILL #set buffer state to wait for fill
+                    decoders[addr] = opuslib.Decoder(RATE, CHANNELS) #create decoder for this client
+                    encoders[addr] = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO) #create encoder for this client
                     voice_clients.append(addr)
+                    voiceret_addr[addr] = retaddr
                     sentmessage = username + " connected to voice server"
                 else:
                     voice_clients.remove(addr)
                     jitter_buffers.pop(addr)
                     buffer_states.pop(addr)
+                    voiceret_addr.pop(addr)
+                    decoders.pop(addr)
+                    encoders.pop(addr)
                     sentmessage = username + " disconnected from voice server"
             elif message.decode() == "/mute":
                 sentmessage = username + " muted"
@@ -190,78 +200,116 @@ def receive_message_loop(client, username, addr):
     exit()
 
 def voice_loop(): #receive voice data, decode it and store in buffers
-    global voice_socket
-    global voice_clients
-    global jitter_buffers
+    global voice_socket, decoders, voice_clients, jitter_buffers, jitter_lock
     voice_socket.settimeout(1)
     while not stop_program_flag:
         try:
             data, addr = voice_socket.recvfrom(4096)
-            if addr in voice_clients: #only process data from clients connected to voice server
-                decoded_data = decoder.decode(data, FRAME_SIZE) #decode data (320 samples)
-                jitter_buffers[addr].append(decoded_data) #store data in buffer
-                #print(addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
-        except: pass#print ("Error receiving voice data")
+            with jitter_lock:
+                if addr in voice_clients: #only process data from clients connected to voice server
+                    decoded_data = decoders[addr].decode(data, FRAME_SIZE) #decode data (320 samples)
+                    jitter_buffers[addr].append(decoded_data) #store data in buffer
+                    #print(addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
+        except socket.timeout: pass
+        except Exception as e:
+            print ("Error receiving voice data:", e)
+            traceback.print_exc()
+
 
 def mix_and_send_voice(): #mix all voice buffers, encode it and send to all clients except the sender
-    global voice_socket
+    global voiceret_socket
     global voice_clients
     global jitter_buffers
+    global buffer_states
+    global jitter_lock
+    global encoders
     next_loop_timing = time.time()
     while not stop_program_flag:
         try:
-            #STEP 1: iterate through all clients to mix and send each one without removing the data from the buffers
-            for addr in voice_clients: 
-                streams_to_mix = []
-                for addr2 in voice_clients: #iterate through all clients to determine which streams to mix
-                    if addr != addr2: #don't mix the stream of the client itself
-                        if len(jitter_buffers[addr2]) > 0:
-                            if buffer_states[addr2] == BUFFER_RUNNING:
-                                streams_to_mix.append(jitter_buffers[addr2][0]) #add stream to mix without removing it
-                            elif buffer_states[addr2] == BUFFER_WAIT_DRAIN: #add 2 streams to mix without removing them
-                                streams_to_mix.append(jitter_buffers[addr2][0])
-                                streams_to_mix.append(jitter_buffers[addr2][1])
-                #mix streams and send mixed data
-                if len(streams_to_mix) > 0: #mix streams only if there are more than one
-                    audio_data = [np.frombuffer(stream, dtype=np.int16) for stream in streams_to_mix] #convert streams to numpy arrays
-                    min_length = min(len(data) for data in audio_data)
-                    audio_data = [data[:min_length] for data in audio_data] #truncate data to the shortest length
-                    mixed_data = sum(audio_data) #mix audio data
-                    mixed_data = mixed_data // len(audio_data) #normalize mixed data
-                    mixed_data = np.clip(mixed_data, -32768, 32767) #clip mixed data to avoid overflow or underflow
-                    mixed_data = mixed_data.astype(np.int16).tobytes() #convert mixed data to bytes
-                    encoded_data = encoder.encode(mixed_data, FRAME_SIZE)
-                    voice_socket.sendto(encoded_data, addr)
-            #STEP 2: buffers cleanup and state management
-            for addr in voice_clients:
-                #print("State before cleanup: ", addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
-                if buffer_states[addr] == BUFFER_WAIT_FILL: #if buffer is waiting to fill, don't clean the buffer
-                    if len(jitter_buffers[addr]) >= JITTER_BUFFER_OPTIMAL: #if buffer is on optimal size, change state to running
-                        buffer_states[addr] = BUFFER_RUNNING
-                elif buffer_states[addr] == BUFFER_RUNNING: #if buffer is running, clean one frame from the buffer
-                    jitter_buffers[addr].popleft()
-                    if len(jitter_buffers[addr]) >= JITTER_BUFFER_MAX: #if buffer is on max size, change state to wait for drain
-                        buffer_states[addr] = BUFFER_WAIT_DRAIN
-                    elif len(jitter_buffers[addr]) == 0: #if buffer is empty, change state to wait for fill
-                        buffer_states[addr] = BUFFER_WAIT_FILL
-                elif buffer_states[addr] == BUFFER_WAIT_DRAIN: #if buffer is waiting to drain, clean two frames from the buffer
-                    jitter_buffers[addr].popleft()
-                    jitter_buffers[addr].popleft()
-                    if len(jitter_buffers[addr]) <= JITTER_BUFFER_OPTIMAL: #if buffer is on optimal size, change state to running
-                        buffer_states[addr] = BUFFER_RUNNING
-                #print("State after cleanup: ", addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
+            #STEP 1: get data from buffers and add it to mix dictionary
+            with jitter_lock:
+                streams_to_mix = {addr: [] for addr in voice_clients}
+                for addr in list(voice_clients):
+                    state = buffer_states.get(addr, BUFFER_WAIT_FILL) #get buffer state, default to wait fill if not found
+                    q = jitter_buffers.get(addr, deque()) #get buffer, default to empty deque if not found
+
+                    if state == BUFFER_WAIT_FILL: #if buffer is waiting to fill, don't get data from it
+                        if len(q) >= JITTER_BUFFER_OPTIMAL: #if buffer is on optimal size, change state to running
+                            buffer_states[addr] = BUFFER_RUNNING
+                    
+                    elif buffer_states[addr] == BUFFER_RUNNING: #if buffer is running, get one frame from the buffer
+                        if len(q) > 0:
+                            streams_to_mix[addr].append(q.popleft()) #get one frame from buffer
+                        if len(q) >= JITTER_BUFFER_MAX:
+                            buffer_states[addr] = BUFFER_WAIT_DRAIN #if buffer is on max size, change state to wait for drain
+                        elif len(q) == 0: #if buffer is empty, change state to wait for fill
+                            buffer_states[addr] = BUFFER_WAIT_FILL
+                    
+                    elif buffer_states[addr] == BUFFER_WAIT_DRAIN: #if buffer is waiting to drain, get two frames from the buffer
+                        if len(q) > 0:
+                            streams_to_mix[addr].append(q.popleft())
+                        if len(q) > 0:
+                            streams_to_mix[addr].append(q.popleft())
+                        if len(q) <= JITTER_BUFFER_OPTIMAL:
+                            buffer_states[addr] = BUFFER_RUNNING #if buffer is on optimal size, change state to running
+
+            #STEP 2a: get a list of all frames to mix, and note the index of the frames that belong to the each client
+            all_arrays = []  # list of all numpy arrays to mix
+            per_client_frames = {}  # dictionary that maps client address to list of indices in all_arrays
+            idx = 0 # track index of the inserted frames on all_arrays
+            for addr, frames in streams_to_mix.items(): # iterate through all clients and their frame lists
+                per_client_frames[addr] = [] # initialize list for this client
+                for f in frames: # iterate through all frames for this client
+                    arr = np.frombuffer(f, dtype=np.int16) # convert bytes to numpy array
+                    all_arrays.append(arr) # add array to all_arrays list
+                    per_client_frames[addr].append(idx) # add index to per_client_frames for this client to avoid sending own audio back
+                    idx += 1
+                
+            #STEP 2b: mix all frames together
+            if len(all_arrays) == 0:
+                # nothing to send: skip this iteration (sleep below)
+                pass
+            else:
+                min_len = min(a.shape[0] for a in all_arrays) # truncate to the shortest length
+                arrays32 = [a[:min_len].astype(np.int64) for a in all_arrays] # convert to int32 for safe accumulation
+                total_sum = np.sum(arrays32, axis=0, dtype=np.int64) # total sum (dtype to avoid overflow)
+                
+                #STEP 2c: substract each client's own audio from the total sum, encode and send
+                total_frames = len(arrays32) # number of frames mixed
+                for addr in list(voice_clients):
+                    client_idxs = per_client_frames.get(addr, []) # indices of frames that belong to this client
+                    n_client_frames = len(client_idxs) # number of frames from this client
+                    n_other = total_frames - n_client_frames # number of frames from other clients
+                    if n_other <= 0:
+                        # if there are no other frames, skip sending to this client
+                        continue
+                    if n_client_frames > 0:
+                        # if there are frames from this client, substract them from the total sum
+                        client_sum = np.sum([arrays32[i] for i in client_idxs], axis=0, dtype=np.int64) # sum of client's own frames
+                        others_sum = total_sum - client_sum # substract client's own frames from total sum
+                    else:
+                        others_sum = total_sum # if there are no frames from this client, send the total sum
+                    # normalize and clip to int16 range
+                    mixed = (others_sum // n_other)
+                    mixed = np.clip(mixed, -32768, 32767).astype(np.int16).tobytes()
+                    # encode and send
+                    try:
+                        encoded_data = encoders[addr].encode(mixed, FRAME_SIZE)
+                        voiceret_socket.sendto(encoded_data, voiceret_addr[addr])
+                    except Exception as e:
+                        print("Error encoding/sending to", addr, " Error details:", e)
+                        traceback.print_exc()
         except Exception as e:
-            #print("Error mixing one frame of audio. Skipping to the next iteration. Error details:", e)
-            #traceback.print_exc()
-            pass
+            print("Error mixing one frame of audio. Skipping to the next iteration. Error details:", e)
+            traceback.print_exc()
+
         #STEP 3: sleep until the next loop timing
         next_loop_timing += MIX_INTERVAL
         sleep_time = next_loop_timing - time.time()
         if sleep_time > 0:
             time.sleep(sleep_time)
-        #else:
-        #    print("Warning: mixing and sending audio took longer than expected. Skipping to the next iteration.")
-        
+        else:
+            print("Warning: mixing and sending audio took longer than expected. Skipping to the next iteration.")
 
 
 
@@ -276,9 +324,21 @@ def stop_program():
     log("Server stopped")
     exit()
 
+#Program start
 stop_program_flag = False
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+print("INITIALATING STARTING PROCESS...")
+#create sockets
+print("Creating sockets...")
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket for main connection management and chat
+server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
+file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket for file transfer
+file_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
+voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # create socket for voice
+voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
+voiceret_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # create socket for voice return
+voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
+#load config file or create default config file
+print("Loading config file...")
 try:
     with open("config.json", 'r') as file:
         config = json.load(file)
@@ -286,7 +346,15 @@ try:
         port = config.get("port")
         fileport = config.get("fileport")
         voiceport = config.get("voiceport")
+        voiceretport = config.get("voiceretport")
         storagelimit = config.get("storagelimit")
+    #try to bind sockets to ip and port
+    print("Validating parameters and binding sockets...")
+    server_socket.bind((ip, int(port)))
+    file_socket.bind((ip, int(fileport)))
+    voice_socket.bind((ip, int(voiceport)))
+    voiceret_socket.bind((ip, int(voiceretport)))
+    
 except:
     print("No config file or invalid format. Creating new config file with default values.")
     config ={
@@ -294,37 +362,44 @@ except:
         "port": "12345",
         "fileport": "12346",
         "voiceport": "12347",
+        "voiceretport": "12348",
         "storagelimit": 1024
     }
     with open("config.json", 'w') as file:
         json.dump(config, file, indent=4)
     print("Config file created. Please edit the file before starting the server again.")
     exit()
-server_socket.bind((ip, int(port)))
-file_socket.bind((ip, int(fileport)))
+
+print("Initialating lists and voice parameters...")
+#lists of clients and voice clients connected
 client_list = []
-accept_thread = threading.Thread(target=accept_connections)
-accept_thread.start()
-file_thread = threading.Thread(target=accept_file_connections)
-file_thread.start()
-voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-voice_socket.bind((ip, int(voiceport)))
-voice_thread = threading.Thread(target=voice_loop)
 voice_clients = []
+voiceret_addr = {} #dictionary that associates the voice client address with the return address of that client
+
+#voice server buffers and codec parameters
 jitter_buffers = {}
 buffer_states = {}
+jitter_lock = threading.Lock()
 CHANNELS = 1 # mono
-RATE = 16000  # 16 kHz
-FRAME_SIZE = 320 # 20 ms, 640 bytes per frame
-MIX_INTERVAL = 0.020 # 20 ms
+RATE = 16000  # 16 kHz (samples per second)
+FRAME_SIZE = 320 # 320 samples per frame (640 bytes), 20 ms per frame
+MIX_INTERVAL = FRAME_SIZE / RATE # seconds per frame
 JITTER_BUFFER_OPTIMAL = 4 # Optimal buffer size in frames
 JITTER_BUFFER_MAX = 8 # Maximum buffer size in frames
 #buffer states
 BUFFER_WAIT_FILL = 0 #Waiting for buffer to fill to optimal size
 BUFFER_RUNNING = 1 #Buffer is running correctly
 BUFFER_WAIT_DRAIN = 2 #Waiting for buffer to empty to optimal size
-encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO)
-decoder = opuslib.Decoder(RATE, CHANNELS)
+decoders = {} # Each client has its own decoder instance as opus is a stateful codec and assumes each frame is sequential
+encoders = {} # Same for encoders
+
+#start threads
+print("Starting threads...")
+accept_thread = threading.Thread(target=accept_connections)
+accept_thread.start()
+file_thread = threading.Thread(target=accept_file_connections)
+file_thread.start()
+voice_thread = threading.Thread(target=voice_loop)
 voice_thread.start()
 mix_thread = threading.Thread(target=mix_and_send_voice)
 mix_thread.start()
@@ -336,7 +411,7 @@ def log(message):
 
 
 
-print("Server started")
+print("Server started successfully")
 log("Server started")
 input("Press enter to stop server\n")
 print("Stopping server")
