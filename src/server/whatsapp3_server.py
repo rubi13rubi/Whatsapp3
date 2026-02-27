@@ -153,10 +153,11 @@ def receive_message_loop(client, username, addr):
     while not stop_program_flag:
         try:
             message = client.recv(1024)
+            decoded_message = message.decode()
             if not message: break #if message is empty, client closed connection
-            if message.decode().startswith("/voice"):
+            if decoded_message.startswith("/voice"):
                 ip = addr[0]
-                id = message.split(" ")[1] #get voice id from message
+                id = decoded_message.split(" ")[1] #get voice id from message
 
                 if id not in expected_voice_ids:
                     expected_voice_ids.append(id) #add voice id to expected voice ids (new user connecting)
@@ -174,12 +175,12 @@ def receive_message_loop(client, username, addr):
 
                     sentmessage = username + " disconnected from voice server"
 
-            elif message.decode() == "/mute":
+            elif decoded_message == "/mute":
                 sentmessage = username + " muted"
-            elif message.decode() == "/unmute":
+            elif decoded_message == "/unmute":
                 sentmessage = username + " unmuted"
             else:
-                sentmessage = username + ": " + message.decode()
+                sentmessage = username + ": " + decoded_message
             print(sentmessage)
             log(sentmessage)
             for c in client_list:
@@ -187,7 +188,9 @@ def receive_message_loop(client, username, addr):
                     c.send(sentmessage.encode())
         except Exception as e:
             if str(e) == "timed out": pass #Ignore timeout errors
-            else: break #if error is not timeout, close connection
+            else:
+                #print(e)
+                break #if error is not timeout, close connection
 
     print(username + " disconnected")
     log(username + " disconnected")

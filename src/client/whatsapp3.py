@@ -57,7 +57,7 @@ def send_message(message):
             threading.Thread(target=voice_rcv_loop).start()
             threading.Thread(target=voice_send_loop).start()
             threading.Thread(target=voice_play_loop).start()
-        message += voice_id
+        message +=  " " + voice_id
             
     elif message == "/mute":
         global muted
