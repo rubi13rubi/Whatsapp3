@@ -147,7 +147,8 @@ def accept_connections():
 def receive_message_loop(client, username, addr):
     global stop_program_flag
     global client_list
-    global expected_voice_ips
+    global expected_voice_ids
+    global voice_ids
     index = client_list.index(client)
     while not stop_program_flag:
         try:
@@ -155,20 +156,22 @@ def receive_message_loop(client, username, addr):
             if not message: break #if message is empty, client closed connection
             if message.decode().startswith("/voice"):
                 ip = addr[0]
+                id = message.split(" ")[1] #get voice id from message
 
-                if ip not in expected_voice_ips:
-                    expected_voice_ips.append(ip) #add ip to expected voice ips (new user connected)
+                if id not in expected_voice_ids:
+                    expected_voice_ids.append(id) #add voice id to expected voice ids (new user connecting)
                     sentmessage = username + " connected to voice server"
                 else:
-                    expected_voice_ips.remove(ip) #remove ip from expected voice ips (user disconnected)
-                    # Disconnecting process (cleanup)
-                    for addr in voice_clients:
-                        if addr[0] == ip:
-                            voice_clients.remove(addr)
-                            jitter_buffers.pop(addr, None)
-                            buffer_states.pop(addr, None)
-                            decoders.pop(addr, None)
-                            encoders.pop(addr, None)
+                    expected_voice_ids.remove(id) #remove voice id from expected voice ids
+                    voice_ip = voice_ids.get(id) #get the IP address associated with this voice id
+                    # Disconnecting process (cleanup) if the client had already sent data
+                    if voice_ip and voice_ip in voice_clients:
+                        voice_clients.remove(voice_ip)
+                        jitter_buffers.pop(voice_ip, None)
+                        buffer_states.pop(voice_ip, None)
+                        decoders.pop(voice_ip, None)
+                        encoders.pop(voice_ip, None)
+
                     sentmessage = username + " disconnected from voice server"
 
             elif message.decode() == "/mute":
@@ -195,24 +198,30 @@ def receive_message_loop(client, username, addr):
     exit()
 
 def voice_loop(): #receive voice data, decode it and store in buffers
-    global voice_socket, decoders, voice_clients, jitter_buffers, jitter_lock
+    global voice_socket, decoders, voice_clients, jitter_buffers, jitter_lock, expected_voice_ids, voice_ids
     voice_socket.settimeout(1)
     while not stop_program_flag:
         try:
             data, addr = voice_socket.recvfrom(4096)
+            if len(data) < 16: continue # ignore packets that are too small to contain the voice id
+            id = data[:16]
+            audio_payload = data[16:]
             with jitter_lock:
-                if ip in expected_voice_ips:
-                    if addr not in voice_clients: # manage new client
-                        jitter_buffers[addr] = deque() #create buffer for client if it doesn't exist
-                        buffer_states[addr] = BUFFER_WAIT_FILL #set buffer state to wait for fill
-                        decoders[addr] = opuslib.Decoder(RATE, CHANNELS) #create decoder for this client
-                        encoders[addr] = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO) #create encoder for this client
-                        voice_clients.append(addr)
-                    
+                if addr in voice_clients:
                     # decode data and add to buffer
-                    decoded_data = decoders[addr].decode(data, FRAME_SIZE) #decode data (320 samples)
+                    decoded_data = decoders[addr].decode(audio_payload, FRAME_SIZE) #decode data (320 samples)
                     jitter_buffers[addr].append(decoded_data) #store data in buffer
                     #print(addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
+
+                elif id in expected_voice_ids: # manage new client
+                    jitter_buffers[addr] = deque() #create buffer for client if it doesn't exist
+                    buffer_states[addr] = BUFFER_WAIT_FILL #set buffer state to wait for fill
+                    decoders[addr] = opuslib.Decoder(RATE, CHANNELS) #create decoder for this client
+                    encoders[addr] = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO) #create encoder for this client
+                    voice_clients.append(addr)
+                    voice_ids[id] = addr #associate this voice id with the client's IP address
+                    
+                    
         except socket.timeout: pass
         except Exception as e:
             print ("Error receiving voice data:", e)
@@ -371,7 +380,8 @@ print("Initialating lists and voice parameters...")
 #lists of clients and voice clients connected
 client_list = []
 voice_clients = []
-expected_voice_ips = [] # list of all ips that connected to the voice server
+expected_voice_ids = [] # List of expected identifiers for voice clients.
+voice_ids = {} # Map voice client identifiers to their corresponding IP addresses to manage disconnections.
 
 #voice server buffers and codec parameters
 jitter_buffers = {}

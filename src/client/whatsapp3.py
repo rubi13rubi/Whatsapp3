@@ -16,6 +16,7 @@ import pyaudio
 import opuslib
 from collections import deque
 import numpy as np
+import uuid
 
 
 
@@ -32,6 +33,7 @@ def send_message(message):
     global server_socket
     global voice_enabled
     global gain
+    global voice_id
     if message.startswith("/voice"):
         global voice_socket
         message = "/voice"
@@ -55,6 +57,7 @@ def send_message(message):
             threading.Thread(target=voice_rcv_loop).start()
             threading.Thread(target=voice_send_loop).start()
             threading.Thread(target=voice_play_loop).start()
+        message += voice_id
             
     elif message == "/mute":
         global muted
@@ -242,6 +245,7 @@ def voice_send_loop():
     global voiceaddr
     global voice_socket
     global muted
+    global voice_id
     stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
     while voice_enabled and not stop_program_flag:
         start_time = time.time()
@@ -251,7 +255,7 @@ def voice_send_loop():
             if  not muted:
                 encoded_frame = encoder.encode(frame, CHUNK)
                 #print("Voice read loop time: " + str(time.time() - start_time))
-                voice_socket.sendto(encoded_frame, voiceaddr)
+                voice_socket.sendto(voice_id + encoded_frame, voiceaddr)
         except Exception as e: pass #print("Error sending voice data: " + str(e))
     #print("Voice chat ended")
     stream.close()
@@ -458,6 +462,7 @@ audio = pyaudio.PyAudio()
 encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO)
 decoder = opuslib.Decoder(RATE, CHANNELS)
 voice_enabled = False
+voice_id = str(uuid.uuid4()) # Unique ID for this client's voice data, to identify packets
 create_menu()
 
 
