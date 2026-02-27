@@ -135,8 +135,6 @@ def accept_connections():
                 client.recv(1024) # Sync
                 client.send(voiceport.encode())
                 client.recv(1024) # Sync
-                client.send(voiceretport.encode())
-                client.recv(1024) # Sync
                 print("Connected to", username)
                 log("Connected to " + username)
                 client.send(("Connected to server. Active users: " + str(len(client_list))).encode())
@@ -149,6 +147,7 @@ def accept_connections():
 def receive_message_loop(client, username, addr):
     global stop_program_flag
     global client_list
+    global expected_voice_ips
     index = client_list.index(client)
     while not stop_program_flag:
         try:
@@ -156,26 +155,22 @@ def receive_message_loop(client, username, addr):
             if not message: break #if message is empty, client closed connection
             if message.decode().startswith("/voice"):
                 ip = addr[0]
-                port = int(message.decode().split(" ")[1])
-                retport = int(message.decode().split(" ")[2])
-                addr = (ip, port)
-                retaddr = (ip, retport)
-                if addr not in voice_clients:
-                    jitter_buffers[addr] = deque() #create buffer for client if it doesn't exist
-                    buffer_states[addr] = BUFFER_WAIT_FILL #set buffer state to wait for fill
-                    decoders[addr] = opuslib.Decoder(RATE, CHANNELS) #create decoder for this client
-                    encoders[addr] = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO) #create encoder for this client
-                    voice_clients.append(addr)
-                    voiceret_addr[addr] = retaddr
+
+                if ip not in expected_voice_ips:
+                    expected_voice_ips.append(ip) #add ip to expected voice ips (new user connected)
                     sentmessage = username + " connected to voice server"
                 else:
-                    voice_clients.remove(addr)
-                    jitter_buffers.pop(addr)
-                    buffer_states.pop(addr)
-                    voiceret_addr.pop(addr)
-                    decoders.pop(addr)
-                    encoders.pop(addr)
+                    expected_voice_ips.remove(ip) #remove ip from expected voice ips (user disconnected)
+                    # Disconnecting process (cleanup)
+                    for addr in voice_clients:
+                        if addr[0] == ip:
+                            voice_clients.remove(addr)
+                            jitter_buffers.pop(addr, None)
+                            buffer_states.pop(addr, None)
+                            decoders.pop(addr, None)
+                            encoders.pop(addr, None)
                     sentmessage = username + " disconnected from voice server"
+
             elif message.decode() == "/mute":
                 sentmessage = username + " muted"
             elif message.decode() == "/unmute":
@@ -206,7 +201,15 @@ def voice_loop(): #receive voice data, decode it and store in buffers
         try:
             data, addr = voice_socket.recvfrom(4096)
             with jitter_lock:
-                if addr in voice_clients: #only process data from clients connected to voice server
+                if ip in expected_voice_ips:
+                    if addr not in voice_clients: # manage new client
+                        jitter_buffers[addr] = deque() #create buffer for client if it doesn't exist
+                        buffer_states[addr] = BUFFER_WAIT_FILL #set buffer state to wait for fill
+                        decoders[addr] = opuslib.Decoder(RATE, CHANNELS) #create decoder for this client
+                        encoders[addr] = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO) #create encoder for this client
+                        voice_clients.append(addr)
+                    
+                    # decode data and add to buffer
                     decoded_data = decoders[addr].decode(data, FRAME_SIZE) #decode data (320 samples)
                     jitter_buffers[addr].append(decoded_data) #store data in buffer
                     #print(addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
@@ -217,7 +220,7 @@ def voice_loop(): #receive voice data, decode it and store in buffers
 
 
 def mix_and_send_voice(): #mix all voice buffers, encode it and send to all clients except the sender
-    global voiceret_socket
+    global voice_socket
     global voice_clients
     global jitter_buffers
     global buffer_states
@@ -295,7 +298,7 @@ def mix_and_send_voice(): #mix all voice buffers, encode it and send to all clie
                     # encode and send
                     try:
                         encoded_data = encoders[addr].encode(mixed, FRAME_SIZE)
-                        voiceret_socket.sendto(encoded_data, voiceret_addr[addr])
+                        voice_socket.sendto(encoded_data, addr)
                     except Exception as e:
                         print("Error encoding/sending to", addr, " Error details:", e)
                         traceback.print_exc()
@@ -334,9 +337,6 @@ server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse
 file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create socket for file transfer
 file_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
 voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # create socket for voice
-voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
-voiceret_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # create socket for voice return
-voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #allow reuse of address
 #load config file or create default config file
 print("Loading config file...")
 try:
@@ -346,14 +346,12 @@ try:
         port = config.get("port")
         fileport = config.get("fileport")
         voiceport = config.get("voiceport")
-        voiceretport = config.get("voiceretport")
         storagelimit = config.get("storagelimit")
     #try to bind sockets to ip and port
     print("Validating parameters and binding sockets...")
     server_socket.bind((ip, int(port)))
     file_socket.bind((ip, int(fileport)))
     voice_socket.bind((ip, int(voiceport)))
-    voiceret_socket.bind((ip, int(voiceretport)))
     
 except:
     print("No config file or invalid format. Creating new config file with default values.")
@@ -362,7 +360,6 @@ except:
         "port": "12345",
         "fileport": "12346",
         "voiceport": "12347",
-        "voiceretport": "12348",
         "storagelimit": 1024
     }
     with open("config.json", 'w') as file:
@@ -374,7 +371,7 @@ print("Initialating lists and voice parameters...")
 #lists of clients and voice clients connected
 client_list = []
 voice_clients = []
-voiceret_addr = {} #dictionary that associates the voice client address with the return address of that client
+expected_voice_ips = [] # list of all ips that connected to the voice server
 
 #voice server buffers and codec parameters
 jitter_buffers = {}

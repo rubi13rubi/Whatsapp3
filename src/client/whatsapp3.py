@@ -34,16 +34,12 @@ def send_message(message):
     global gain
     if message.startswith("/voice"):
         global voice_socket
-        global voiceret_socket
         message = "/voice"
         if voice_enabled:
             voice_enabled = False
             message_list.insert(END, "Voice chat disabled")
-            addr = voice_socket.getsockname()
-            retaddr = voiceret_socket.getsockname()
             try: 
                 voice_socket.close()
-                voiceret_socket.close()
             except: pass
         else:
             voice_enabled = True
@@ -51,23 +47,15 @@ def send_message(message):
 
             ip = server_socket.getsockname()[0]
 
-            voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for sending voice data
+            voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for voice data
             voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
             voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
             voice_socket.bind((ip, 0)) # Bind to a random port
 
-            voiceret_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for receiving voice data
-            voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
-            voiceret_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
-            voiceret_socket.bind((ip, 0)) # Bind to a random port
-
             threading.Thread(target=voice_rcv_loop).start()
             threading.Thread(target=voice_send_loop).start()
             threading.Thread(target=voice_play_loop).start()
-            addr = voice_socket.getsockname()
-            retaddr = voiceret_socket.getsockname()
-            #print ("Retaddr " + str(retaddr))
-        message += " " + str(addr[1]) + " " + str(retaddr[1]) # Send the ports to the server
+            
     elif message == "/mute":
         global muted
         if voice_enabled:
@@ -201,16 +189,14 @@ def receive_message_loop():
 def voice_rcv_loop():
     global stop_program_flag
     global voice_enabled
-    global voiceretaddr
-    global voiceret_socket
+    global voiceaddr
     global jitter_buffer
     global buffer_state
     while voice_enabled and not stop_program_flag:
         try:
-            data, addr = voiceret_socket.recvfrom(4096)
-            #print("Received voice data from " + str(addr))
-            #print("Expected voice data from " + str(voiceretaddr))
-            if addr == voiceretaddr:
+            data, addr = voice_socket.recvfrom(4096)
+
+            if addr == voiceaddr:
                 decoded_frame = decoder.decode(data, CHUNK)
                 jitter_buffer.append(decoded_frame)
                 # Buffer state management when filling, management when emptying is done in the play loop
@@ -227,7 +213,7 @@ def voice_play_loop():
     global buffer_state
     stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
     while voice_enabled and not stop_program_flag:
-        start_time = time.time()
+        #start_time = time.time()
         try:
             #print(buffer_state)
             if len(jitter_buffer) == 0:
@@ -385,7 +371,6 @@ def create_chat(ip, port, name, user):
     global message_thread
     global voice_enabled
     global voiceaddr
-    global voiceretaddr
     global muted
 
     try: root.destroy()
@@ -434,14 +419,11 @@ def create_chat(ip, port, name, user):
         server_socket.send("Sync".encode())
         voiceport = server_socket.recv(1024).decode()
         server_socket.send("Sync".encode())
-        voiceretport = server_socket.recv(1024).decode()
-        server_socket.send("Sync".encode())
     except: receive_message("Error connecting to server")
     server_socket.settimeout(None)
     voice_enabled = False
     muted = False
     voiceaddr = (ip, int(voiceport))
-    voiceretaddr = (ip, int(voiceretport))
     #Threads and loops
     message_thread = threading.Thread(target=receive_message_loop)
     message_thread.start()
