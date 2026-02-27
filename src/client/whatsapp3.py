@@ -57,7 +57,7 @@ def send_message(message):
             threading.Thread(target=voice_rcv_loop).start()
             threading.Thread(target=voice_send_loop).start()
             threading.Thread(target=voice_play_loop).start()
-        message +=  " " + voice_id
+        message +=  " " + voice_id.hex() # Append voice id so the server can identify this client's voice data
             
     elif message == "/mute":
         global muted
@@ -255,8 +255,7 @@ def voice_send_loop():
             if  not muted:
                 encoded_frame = encoder.encode(frame, CHUNK)
                 #print("Voice read loop time: " + str(time.time() - start_time))
-                encoded_id = voice_id.encode()
-                voice_socket.sendto(encoded_id + encoded_frame, voiceaddr)
+                voice_socket.sendto(voice_id + encoded_frame, voiceaddr)
         except Exception as e: pass #print("Error sending voice data: " + str(e))
     #print("Voice chat ended")
     stream.close()
@@ -463,7 +462,7 @@ audio = pyaudio.PyAudio()
 encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO)
 decoder = opuslib.Decoder(RATE, CHANNELS)
 voice_enabled = False
-voice_id = str(uuid.uuid4()) # Unique ID for this client's voice data, to identify packets
+voice_id = uuid.uuid4().bytes # Unique ID for this client's voice data, to identify packets
 create_menu()
 
 

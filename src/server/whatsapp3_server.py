@@ -157,7 +157,7 @@ def receive_message_loop(client, username, addr):
             if not message: break #if message is empty, client closed connection
             if decoded_message.startswith("/voice"):
                 ip = addr[0]
-                id = decoded_message.split(" ")[1] #get voice id from message
+                id = bytes.fromhex(decoded_message.split(" ")[1]) #get voice id from message
 
                 if id not in expected_voice_ids:
                     expected_voice_ids.append(id) #add voice id to expected voice ids (new user connecting)
@@ -207,9 +207,10 @@ def voice_loop(): #receive voice data, decode it and store in buffers
         try:
             data, addr = voice_socket.recvfrom(4096)
             if len(data) < 16: continue # ignore packets that are too small to contain the voice id
-            id = data[:16].decode() #get voice id from first 16 bytes of data
+            id = data[:16] #get voice id from first 16 bytes of data
             audio_payload = data[16:]
             with jitter_lock:
+                #print(id, expected_voice_ids)
                 if addr in voice_clients:
                     # decode data and add to buffer
                     decoded_payload = decoders[addr].decode(audio_payload, FRAME_SIZE) #decode data (320 samples)
