@@ -207,13 +207,13 @@ def voice_loop(): #receive voice data, decode it and store in buffers
         try:
             data, addr = voice_socket.recvfrom(4096)
             if len(data) < 16: continue # ignore packets that are too small to contain the voice id
-            id = data[:16]
+            id = data[:16].decode() #get voice id from first 16 bytes of data
             audio_payload = data[16:]
             with jitter_lock:
                 if addr in voice_clients:
                     # decode data and add to buffer
-                    decoded_data = decoders[addr].decode(audio_payload, FRAME_SIZE) #decode data (320 samples)
-                    jitter_buffers[addr].append(decoded_data) #store data in buffer
+                    decoded_payload = decoders[addr].decode(audio_payload, FRAME_SIZE) #decode data (320 samples)
+                    jitter_buffers[addr].append(decoded_payload) #store data in buffer
                     #print(addr, " ", buffer_states[addr], " ", len(jitter_buffers[addr]))
 
                 elif id in expected_voice_ids: # manage new client

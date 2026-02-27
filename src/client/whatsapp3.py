@@ -255,7 +255,8 @@ def voice_send_loop():
             if  not muted:
                 encoded_frame = encoder.encode(frame, CHUNK)
                 #print("Voice read loop time: " + str(time.time() - start_time))
-                voice_socket.sendto(voice_id + encoded_frame, voiceaddr)
+                encoded_id = voice_id.encode()
+                voice_socket.sendto(encoded_id + encoded_frame, voiceaddr)
         except Exception as e: pass #print("Error sending voice data: " + str(e))
     #print("Voice chat ended")
     stream.close()
