@@ -44,9 +44,9 @@ def accept_file_connections():
                 client.send("Sync".encode())
                 #Send or receive file
                 if mode == "receive":
-                    threading.Thread(target=send_file, args=(client,)).start()
+                    threading.Thread(target=send_file, args=(client,), daemon=True).start()
                 elif mode == "send":
-                    threading.Thread(target=receive_file, args=(client,username,)).start()
+                    threading.Thread(target=receive_file, args=(client,username,), daemon=True).start()
         except: pass
 
 def receive_file(client, username):
@@ -141,7 +141,7 @@ def accept_connections():
                 for c in client_list:
                     c.send(("NEW CLIENT: " + username).encode())
                 client_list.append(client)
-                threading.Thread(target=receive_message_loop, args=(client, username, addr,)).start()
+                threading.Thread(target=receive_message_loop, args=(client, username, addr,), daemon=True).start()
         except: pass
 
 def receive_message_loop(client, username, addr):
@@ -326,6 +326,7 @@ def mix_and_send_voice(): #mix all voice buffers, encode it and send to all clie
             time.sleep(sleep_time)
         else:
             print("Warning: mixing and sending audio took longer than expected. Skipping to the next iteration.")
+            next_loop_timing = time.time()
 
 
 
@@ -406,13 +407,13 @@ encoders = {} # Same for encoders
 
 #start threads
 print("Starting threads...")
-accept_thread = threading.Thread(target=accept_connections)
+accept_thread = threading.Thread(target=accept_connections, daemon=True)
 accept_thread.start()
-file_thread = threading.Thread(target=accept_file_connections)
+file_thread = threading.Thread(target=accept_file_connections, daemon=True)
 file_thread.start()
-voice_thread = threading.Thread(target=voice_loop)
+voice_thread = threading.Thread(target=voice_loop, daemon=True)
 voice_thread.start()
-mix_thread = threading.Thread(target=mix_and_send_voice)
+mix_thread = threading.Thread(target=mix_and_send_voice, daemon=True)
 mix_thread.start()
 
 def log(message):

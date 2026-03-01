@@ -54,9 +54,9 @@ def send_message(message):
             voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
             voice_socket.bind((ip, 0)) # Bind to a random port
 
-            threading.Thread(target=voice_rcv_loop).start()
-            threading.Thread(target=voice_send_loop).start()
-            threading.Thread(target=voice_play_loop).start()
+            threading.Thread(target=voice_rcv_loop, daemon=True).start()
+            threading.Thread(target=voice_send_loop, daemon=True).start()
+            threading.Thread(target=voice_play_loop, daemon=True).start()
         message +=  " " + voice_id.hex() # Append voice id so the server can identify this client's voice data
             
     elif message == "/mute":
@@ -124,7 +124,7 @@ def chat_double_click(event, ip, fileport, user):
     filename = message.split(" ")[-5]
     filepath = filedialog.asksaveasfilename(parent=root, title='Save file as', initialfile=filename)
     receive_message("Receiving file " + filename + ". Please wait.")
-    threading.Thread(target=receive_file, args=(ip, fileport, user, filename, filepath)).start()
+    threading.Thread(target=receive_file, args=(ip, fileport, user, filename, filepath), daemon=True).start()
         
 
 def receive_file(ip, fileport, user, filename, filepath):
@@ -155,21 +155,20 @@ def receive_file(ip, fileport, user, filename, filepath):
     finally:
         file_socket.close()
 
-def stop_chat():
-    global root
-    global message_thread
+def stop_chat(forced=False):
     global stop_program_flag
     global server_socket
+    global voice_socket
     global voice_enabled
-    if voice_enabled:
+    # If forced is true, server disconnected so it cant receive the voice disable message
+    if voice_enabled and not forced:
         send_message("/voice")
     stop_program_flag = True
     try: voice_socket.close()
     except: pass
-    try: message_thread.join()
+    try: server_socket.close()
     except: pass
-    server_socket.close()
-    create_menu()
+    create_menu(show_disconnect_warning=forced)
 
 def stop_program():
     global root
@@ -185,10 +184,15 @@ def receive_message_loop():
     server_socket.settimeout(1)
     while not stop_program_flag:   
         try:
-            message = server_socket.recv(1024).decode()
-            receive_message(message)
-        except: pass
+            message_bytes = server_socket.recv(1024)
+            if not message_bytes:
+                root.after(0, lambda: stop_chat(forced=True)) # Schedule on main thread
+                return
+            receive_message(message_bytes.decode())
+        except socket.timeout: pass
+        except Exception: break
     server_socket.close()
+
 def voice_rcv_loop():
     global stop_program_flag
     global voice_enabled
@@ -219,6 +223,7 @@ def voice_play_loop():
         #start_time = time.time()
         try:
             #print(buffer_state)
+            # Buffer state management when emptying, management when filling is done in the receive loop
             if len(jitter_buffer) == 0:
                 buffer_state = BUFFER_WAIT_FILL
             if buffer_state == BUFFER_WAIT_FILL: # If buffer is too empty, play silence
@@ -317,7 +322,7 @@ def delete_server():
 #___________________________________________________________
 
 
-def create_menu():
+def create_menu(show_disconnect_warning=False):
     global root
     global stop_program_flag
     global server_list
@@ -351,6 +356,9 @@ def create_menu():
     user_entry.pack()
     connect_button = ttk.Button(root, text="Connect", command = lambda: connect_button_click(user_entry.get())).pack()
     enter_action = root.bind('<Return>', lambda event: connect_button_click(user_entry.get()))
+    if show_disconnect_warning: # Warning window if the chat was closed due to server disconnection or error
+        from tkinter import messagebox
+        root.after(100, lambda: messagebox.showwarning("Disconnected", "The server has disconnected or an error occurred."))
     root.mainloop()
 
 def create_file_send_window(ip, fileport, user):
@@ -429,7 +437,7 @@ def create_chat(ip, port, name, user):
     muted = False
     voiceaddr = (ip, int(voiceport))
     #Threads and loops
-    message_thread = threading.Thread(target=receive_message_loop)
+    message_thread = threading.Thread(target=receive_message_loop, daemon=True)
     message_thread.start()
     root.mainloop()
 
