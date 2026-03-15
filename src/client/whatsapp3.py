@@ -12,16 +12,28 @@ import threading
 from tkinter import *
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter import messagebox
 import pyaudio
 import opuslib
 from collections import deque
 import numpy as np
 import uuid
+import whatsapp3_client
 
+root = None
+message_list = None
+message_entry = None
+server_list = []
+server_listbox = None
 
+# ____________________________________________________________
+# Receive and send functions, called by the GUI elements and the client backend callbacks
+# ____________________________________________________________
 
 def receive_message(message):
     global message_list
+    if message_list is None:
+        return
     at_bottom = message_list.yview()[1] == 1.0
     message_list.insert(END, message)
     if at_bottom:
@@ -30,240 +42,122 @@ def receive_message(message):
 def send_message(message):
     global message_list
     global message_entry
-    global server_socket
-    global voice_enabled
-    global gain
-    global voice_id
-    if message.startswith("/voice"):
-        global voice_socket
-        message = "/voice"
-        if voice_enabled:
-            voice_enabled = False
-            message_list.insert(END, "Voice chat disabled")
-            try: 
-                voice_socket.close()
-            except: pass
-        else:
-            voice_enabled = True
-            message_list.insert(END, "Voice chat enabled")
 
-            ip = server_socket.getsockname()[0]
+    if message_list is None or message_entry is None:
+        return
 
-            voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for voice data
-            voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
-            voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
-            voice_socket.bind((ip, 0)) # Bind to a random port
-
-            threading.Thread(target=voice_rcv_loop, daemon=True).start()
-            threading.Thread(target=voice_send_loop, daemon=True).start()
-            threading.Thread(target=voice_play_loop, daemon=True).start()
-        message +=  " " + voice_id.hex() # Append voice id so the server can identify this client's voice data
-            
-    elif message == "/mute":
-        global muted
-        if voice_enabled:
-            if muted:
-                muted = False
-                message_list.insert(END, "Unmuted")
-                message = "/unmute"
-            else:
-                muted = True
-                message_list.insert(END, "Muted")
-                message = "/mute"
-        else:
-            message_list.insert(END, "You need to enable voice chat first")
-            message = ""
-    elif message.startswith("/gain"):
-        try: gain = float(message_entry.get().split(" ")[1])
-        except: message_list.insert(END, "Invalid gain value")
-        message_list.insert(END, "Current gain: " + str(gain))
-        message = ""
-
-    else: message_list.insert(END, "YOU: " + message)
+    message_list.insert(END, "YOU: " + message)
     message_entry.delete(0, 'end') #clear the entry box
     message_list.see('end')
-    try:
-        server_socket.send((message).encode())
-    except:
-        message_list.insert(END, "Error sending message")
+    client_backend.send_chat_message(message)
 
-def send_file(ip, fileport, user, filepath, window):
-    if filepath == "Select a file to send" or filepath == "":
-        return
-    try:
-        file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        file_socket.connect((ip, int(fileport)))
-        file_socket.send("WSP3".encode())
-        file_socket.recv(1024) # Sync
-        file_socket.send(user.encode())
-        file_socket.recv(1024) # Sync
-        file_socket.send("send".encode())
-        file_socket.recv(1024) # Sync
-        filename = filepath.split("/")[-1]
-        if (" " in filename): filename = filename.replace(" ", "_")
-        file_socket.send(filename.encode())
-        file_socket.recv(1024) # Sync
-        file = open(filepath, "rb")
-        filedata = file.read()
-        filesize = len(filedata)
-        file_socket.send(str(filesize).encode())
-        file_socket.recv(1024) # Sync
-        receive_message("Sending file " + filename + ". Please wait.")
-        file_socket.sendall(filedata)
-    except:
-        receive_message("Error sending file")
-    finally:
-        file_socket.close()
-        window.destroy()
+#def send_file(ip, fileport, user, filepath, window):
+#    if filepath == "Select a file to send" or filepath == "":
+#        return
+#    try:
+#        file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#        file_socket.connect((ip, int(fileport)))
+#        file_socket.send("WSP3".encode())
+#        file_socket.recv(1024) # Sync
+#        file_socket.send(user.encode())
+#        file_socket.recv(1024) # Sync
+#        file_socket.send("send".encode())
+#        file_socket.recv(1024) # Sync
+#        filename = filepath.split("/")[-1]
+#        if (" " in filename): filename = filename.replace(" ", "_")
+#        file_socket.send(filename.encode())
+#        file_socket.recv(1024) # Sync
+#        file = open(filepath, "rb")
+#        filedata = file.read()
+#        filesize = len(filedata)
+#        file_socket.send(str(filesize).encode())
+#        file_socket.recv(1024) # Sync
+#        receive_message("Sending file " + filename + ". Please wait.")
+#        file_socket.sendall(filedata)
+#    except:
+#        receive_message("Error sending file")
+#    finally:
+#        file_socket.close()
+#        window.destroy()
 
-def chat_double_click(event, ip, fileport, user):
-    global message_list
-    message = message_list.get(message_list.nearest(event.y))
-    if not("sent file" in message) or ":" in message:
-        return
-    filename = message.split(" ")[-5]
-    filepath = filedialog.asksaveasfilename(parent=root, title='Save file as', initialfile=filename)
-    receive_message("Receiving file " + filename + ". Please wait.")
-    threading.Thread(target=receive_file, args=(ip, fileport, user, filename, filepath), daemon=True).start()
-        
 
-def receive_file(ip, fileport, user, filename, filepath):
-    try:
-        file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        file_socket.connect((ip, int(fileport)))
-        file_socket.send("WSP3".encode())
-        file_socket.recv(1024) # Sync
-        file_socket.send(user.encode())
-        file_socket.recv(1024) # Sync
-        file_socket.send("receive".encode())
-        file_socket.recv(1024) # Sync
-        file_socket.send(filename.encode())
-        size = int(file_socket.recv(1024).decode())
-        if size == 0:
-            receive_message("File not found. It may have been deleted by the server.")
-            return
-        file_socket.send("Sync".encode())
-        with open(filepath, "wb") as file:
-            received = 0
-            while received < size:
-                data = file_socket.recv(1024)
-                file.write(data)
-                received += len(data)
-        receive_message("File saved in " + filepath)
-    except:
-        receive_message("Error receiving file")
-    finally:
-        file_socket.close()
 
-def stop_chat(forced=False):
-    global stop_program_flag
-    global server_socket
-    global voice_socket
-    global voice_enabled
-    # If forced is true, server disconnected so it cant receive the voice disable message
-    if voice_enabled and not forced:
-        send_message("/voice")
-    stop_program_flag = True
-    try: voice_socket.close()
-    except: pass
-    try: server_socket.close()
-    except: pass
-    create_menu(show_disconnect_warning=forced)
+# ___________________________________________________________
+# Other small functions for GUI and program control
+# ___________________________________________________________
+
+
+#def chat_double_click(event, ip, fileport, user):
+#    global message_list
+#    message = message_list.get(message_list.nearest(event.y))
+#    if not("sent file" in message) or ":" in message:
+#        return
+#    filename = message.split(" ")[-5]
+#    filepath = filedialog.asksaveasfilename(parent=root, title='Save file as', initialfile=filename)
+#    receive_message("Receiving file " + filename + ". Please wait.")
+#    threading.Thread(target=receive_file, args=(ip, fileport, user, filename, filepath), daemon=True).start()
+
+#def create_file_send_window(ip, fileport, user):
+#    #Creates a window with a file selector and a send button
+#    window = Toplevel()
+#    window.geometry("200x100")
+#    window.resizable(False, False)
+#    window.title("Send a file")
+#    file_label = ttk.Label(window, text="Select a file to send")
+#    file_label.pack()
+#    file_selector = ttk.Button(window, text="Select file", command = lambda: file_label.config(text=filedialog.askopenfilename(parent=window, title='Choose a file'))).pack()
+#    send_button = ttk.Button(window, text="Send", command = lambda: send_file(ip, fileport, user, file_label.cget("text"), window)).pack()
+#    window.mainloop()
 
 def stop_program():
     global root
-    global stop_program_flag
-    stop_program_flag = True
-    root.destroy()
-    audio.terminate()
-    exit()
+    clear_backend_callbacks()
+    client_backend.disconnect()
+    if root is not None and root.winfo_exists():
+        root.destroy()
 
-def receive_message_loop():
+
+def clear_root():
     global message_list
-    global server_socket
-    server_socket.settimeout(1)
-    while not stop_program_flag:   
-        try:
-            message_bytes = server_socket.recv(1024)
-            if not message_bytes:
-                root.after(0, lambda: stop_chat(forced=True)) # Schedule on main thread
-                return
-            receive_message(message_bytes.decode())
-        except socket.timeout: pass
-        except Exception: break
-    server_socket.close()
+    global message_entry
+    global server_listbox
 
-def voice_rcv_loop():
-    global stop_program_flag
-    global voice_enabled
-    global voiceaddr
-    global jitter_buffer
-    global buffer_state
-    while voice_enabled and not stop_program_flag:
-        try:
-            data, addr = voice_socket.recvfrom(4096)
+    if root is None or not root.winfo_exists():
+        return
+    for widget in root.winfo_children():
+        widget.destroy()
+    message_list = None
+    message_entry = None
+    server_listbox = None
 
-            if addr == voiceaddr:
-                decoded_frame = decoder.decode(data, CHUNK)
-                jitter_buffer.append(decoded_frame)
-                # Buffer state management when filling, management when emptying is done in the play loop
-                if buffer_state == BUFFER_WAIT_FILL and len(jitter_buffer) >= JITTER_BUFFER_OPTIMAL:
-                    buffer_state = BUFFER_RUNNING
-                elif len(jitter_buffer) >= JITTER_BUFFER_MAX:
-                    buffer_state = BUFFER_WAIT_DRAIN
-        except: pass
 
-def voice_play_loop():
-    global stop_program_flag
-    global voice_enabled
-    global jitter_buffer
-    global buffer_state
-    stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
-    while voice_enabled and not stop_program_flag:
-        #start_time = time.time()
-        try:
-            #print(buffer_state)
-            # Buffer state management when emptying, management when filling is done in the receive loop
-            if len(jitter_buffer) == 0:
-                buffer_state = BUFFER_WAIT_FILL
-            if buffer_state == BUFFER_WAIT_FILL: # If buffer is too empty, play silence
-                frame = b'\x00' * CHUNK * 2
-            elif buffer_state == BUFFER_RUNNING: # If buffer is running correctly, play one frame
-                frame = jitter_buffer.popleft()
-            elif buffer_state == BUFFER_WAIT_DRAIN: # If buffer is too full, mix two frames
-                frame1 = jitter_buffer.popleft()
-                frame2 = jitter_buffer.popleft()
-                frame1 = np.frombuffer(frame1, np.int16)
-                frame2 = np.frombuffer(frame2, np.int16)
-                frame = ((frame1 + frame2) / 2).astype(np.int16).tobytes()
-                if len(jitter_buffer) <= JITTER_BUFFER_OPTIMAL:
-                    buffer_state = BUFFER_RUNNING
-            stream.write(frame)
-            #print("Voice play loop time: " + str(time.time() - start_time))
-        except Exception as e: pass #print("Error playing voice data: " + str(e))
-    #print("Voice chat ended")
-    stream.close()
+def clear_backend_callbacks():
+    client_backend.on_chat_message = None
+    client_backend.on_system_message = None
+    client_backend.on_file_notice = None
+    client_backend.on_disconnect = None
 
-def voice_send_loop():
-    global stop_program_flag
-    global voice_enabled
-    global voiceaddr
-    global voice_socket
-    global muted
-    global voice_id
-    stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-    while voice_enabled and not stop_program_flag:
-        start_time = time.time()
-        try:
-            frame = stream.read(CHUNK, exception_on_overflow=False)
-            frame = (np.frombuffer(frame, np.int16) * gain).astype(np.int16).tobytes() # Apply gain
-            if  not muted:
-                encoded_frame = encoder.encode(frame, CHUNK)
-                #print("Voice read loop time: " + str(time.time() - start_time))
-                voice_socket.sendto(voice_id + encoded_frame, voiceaddr)
-        except Exception as e: pass #print("Error sending voice data: " + str(e))
-    #print("Voice chat ended")
-    stream.close()
+
+def schedule_on_ui(callback):
+    if root is not None and root.winfo_exists():
+        root.after(0, callback)
+
+
+def show_disconnect_warning(reason):
+    if root is None or not root.winfo_exists():
+        return
+    messagebox.showwarning("Disconnected", "Disconnected from server. Reason: " + reason, parent=root)
+
+
+def leave_chat():
+    clear_backend_callbacks()
+    client_backend.disconnect()
+    create_menu()
+
+
+#___________________________________________________________
+# Main menu (server list) functions
+#___________________________________________________________
 
 def connect_button_click(user):
     global server_listbox
@@ -271,8 +165,7 @@ def connect_button_click(user):
     try:
         if (user == "" or " " in user or "/" in user or ":" in user):
             #Creates an error window
-            from tkinter import messagebox
-            messagebox.showerror("Error", "Invalid username")
+            messagebox.showerror("Error", "Invalid username", parent=root)
             return
         server = server_list[server_listbox.curselection()[0]]
         create_chat(server[0], server[1], server[2], user)
@@ -318,20 +211,18 @@ def delete_server():
     except: pass
 
 #___________________________________________________________
-#main program (what is run when the program is started)
+# Main window creation functions
 #___________________________________________________________
 
 
-def create_menu(show_disconnect_warning=False):
+def create_menu(disconnect_reason=None):
     global root
-    global stop_program_flag
     global server_list
     global server_listbox
+    global client_backend
 
-    try: root.destroy()
-    except: pass
-    stop_program_flag = False
-    root = Tk()
+    clear_root()
+    clear_backend_callbacks()
     root.geometry("400x330")
     root.resizable(True, True)
     root.grid_rowconfigure(0, weight=1)
@@ -356,47 +247,23 @@ def create_menu(show_disconnect_warning=False):
     user_entry.pack()
     connect_button = ttk.Button(root, text="Connect", command = lambda: connect_button_click(user_entry.get())).pack()
     enter_action = root.bind('<Return>', lambda event: connect_button_click(user_entry.get()))
-    if show_disconnect_warning: # Warning window if the chat was closed due to server disconnection or error
-        from tkinter import messagebox
-        root.after(100, lambda: messagebox.showwarning("Disconnected", "The server has disconnected or an error occurred."))
-    root.mainloop()
-
-def create_file_send_window(ip, fileport, user):
-    #Creates a window with a file selector and a send button
-    window = Toplevel()
-    window.geometry("200x100")
-    window.resizable(False, False)
-    window.title("Send a file")
-    file_label = ttk.Label(window, text="Select a file to send")
-    file_label.pack()
-    file_selector = ttk.Button(window, text="Select file", command = lambda: file_label.config(text=filedialog.askopenfilename(parent=window, title='Choose a file'))).pack()
-    send_button = ttk.Button(window, text="Send", command = lambda: send_file(ip, fileport, user, file_label.cget("text"), window)).pack()
-    window.mainloop()
-
+    if disconnect_reason: # Warning window if the chat was closed due to server disconnection or error
+        root.after_idle(lambda reason=disconnect_reason: show_disconnect_warning(reason))
 
 
 def create_chat(ip, port, name, user):
     global root
     global message_list
     global message_entry
-    global server_socket
-    global message_thread
-    global voice_enabled
-    global voiceaddr
-    global muted
+    global client_backend
 
-    try: root.destroy()
-    except: pass
-    root = Tk()
+    clear_root()
     root.geometry("400x300")
     root.resizable(True, True)
     root.grid_rowconfigure(0, weight=1)
     root.grid_columnconfigure(0, weight=1)
     root.title("Whatsapp 3: Chat with " + name)
-    root.protocol("WM_DELETE_WINDOW", stop_chat)
-
-    #Resolve the IP address in case it is a domain name
-    ip = socket.gethostbyname(ip)
+    root.protocol("WM_DELETE_WINDOW", leave_chat)
 
     # Message frame and scroll setup
     message_frame = ttk.Frame(root)
@@ -415,62 +282,21 @@ def create_chat(ip, port, name, user):
     message_entry.grid(row=0, column=0)
     send_button = ttk.Button(entry_frame, width = 8, text="Send", command=lambda: send_message(message_entry.get())).grid(row=0, column = 1)
     down_button = ttk.Button(entry_frame, width = 2, text="↓", command=lambda: message_list.see('end')).grid(row=0, column = 2)
-    quit_button = ttk.Button(root, text="Quit", command=stop_chat).grid(row=2, column = 0)
-    file_button = ttk.Button(root, text="Send file", command=lambda: create_file_send_window(ip, fileport, user)).grid(row=3, column = 0)
+    quit_button = ttk.Button(root, text="Quit", command=leave_chat).grid(row=2, column = 0)
+    #file_button = ttk.Button(root, text="Send file", command=lambda: create_file_send_window(ip, fileport, user)).grid(row=3, column = 0)
     enter_action = root.bind('<Return>', lambda event: send_message(message_entry.get()))
-    message_list.bind('<Double-1>', lambda event: chat_double_click(event, ip, fileport, user))
-    #Network setup
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.settimeout(1)
-    try:
-        server_socket.connect((ip, port))
-        server_socket.send(("WSP3").encode())
-        server_socket.recv(1024) # Sync
-        server_socket.send((user).encode())
-        fileport = server_socket.recv(1024).decode()
-        server_socket.send("Sync".encode())
-        voiceport = server_socket.recv(1024).decode()
-        server_socket.send("Sync".encode())
-    except: receive_message("Error connecting to server")
-    server_socket.settimeout(None)
-    voice_enabled = False
-    muted = False
-    voiceaddr = (ip, int(voiceport))
-    #Threads and loops
-    message_thread = threading.Thread(target=receive_message_loop, daemon=True)
-    message_thread.start()
-    root.mainloop()
+    #message_list.bind('<Double-1>', lambda event: chat_double_click(event, ip, fileport, user))
+    # Backend setup
+    clear_backend_callbacks()
+    client_backend.on_chat_message = lambda sender, content: schedule_on_ui(lambda: receive_message(sender + ": " + content))
+    client_backend.on_system_message = lambda content: schedule_on_ui(lambda: receive_message("SYSTEM: " + content))
+    client_backend.on_file_notice = lambda sender, filename: schedule_on_ui(lambda: receive_message(sender + " sent file " + filename))
+    client_backend.on_disconnect = lambda reason: schedule_on_ui(lambda: create_menu(disconnect_reason=reason))
+    client_backend.connect(ip, port, user)
 
-def test_audio():
-    stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, output=True, frames_per_buffer=CHUNK)
-    while True:
-        data = stream.read(CHUNK)
-        stream.write(data)
-
-
-    
-
-
-#Root window setup and audio init
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 16000 # 16000 Hz (samples per second)
-CHUNK = 320 # 320 samples per frame (640 bytes), 20 ms per frame
-#jitter buffer parameters
-JITTER_BUFFER_OPTIMAL = 4
-JITTER_BUFFER_MAX = 8
-#buffer states
-BUFFER_WAIT_FILL = 0
-BUFFER_RUNNING = 1
-BUFFER_WAIT_DRAIN = 2
-jitter_buffer = deque()
-buffer_state = BUFFER_WAIT_FILL
-gain = 1.0
-audio = pyaudio.PyAudio()
-encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_AUDIO)
-decoder = opuslib.Decoder(RATE, CHANNELS)
-voice_enabled = False
-voice_id = uuid.uuid4().bytes # Unique ID for this client's voice data, to identify packets
+client_backend = whatsapp3_client.Whatsapp3Client()
+root = Tk()
 create_menu()
+root.mainloop()
 
 
