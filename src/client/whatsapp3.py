@@ -43,7 +43,7 @@ def send_message(message):
     global message_list
     global message_entry
 
-    if message_list is None or message_entry is None:
+    if message_list is None or message_entry is None or message.strip() == "":
         return
 
     message_list.insert(END, "YOU: " + message)
@@ -51,63 +51,112 @@ def send_message(message):
     message_list.see('end')
     client_backend.send_chat_message(message)
 
-#def send_file(ip, fileport, user, filepath, window):
-#    if filepath == "Select a file to send" or filepath == "":
-#        return
-#    try:
-#        file_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-#        file_socket.connect((ip, int(fileport)))
-#        file_socket.send("WSP3".encode())
-#        file_socket.recv(1024) # Sync
-#        file_socket.send(user.encode())
-#        file_socket.recv(1024) # Sync
-#        file_socket.send("send".encode())
-#        file_socket.recv(1024) # Sync
-#        filename = filepath.split("/")[-1]
-#        if (" " in filename): filename = filename.replace(" ", "_")
-#        file_socket.send(filename.encode())
-#        file_socket.recv(1024) # Sync
-#        file = open(filepath, "rb")
-#        filedata = file.read()
-#        filesize = len(filedata)
-#        file_socket.send(str(filesize).encode())
-#        file_socket.recv(1024) # Sync
-#        receive_message("Sending file " + filename + ". Please wait.")
-#        file_socket.sendall(filedata)
-#    except:
-#        receive_message("Error sending file")
-#    finally:
-#        file_socket.close()
-#        window.destroy()
-
-
 
 # ___________________________________________________________
 # Other small functions for GUI and program control
 # ___________________________________________________________
 
 
-#def chat_double_click(event, ip, fileport, user):
-#    global message_list
-#    message = message_list.get(message_list.nearest(event.y))
-#    if not("sent file" in message) or ":" in message:
-#        return
-#    filename = message.split(" ")[-5]
-#    filepath = filedialog.asksaveasfilename(parent=root, title='Save file as', initialfile=filename)
-#    receive_message("Receiving file " + filename + ". Please wait.")
-#    threading.Thread(target=receive_file, args=(ip, fileport, user, filename, filepath), daemon=True).start()
+def chat_double_click(event):
+    global message_list
+    message = message_list.get(message_list.nearest(event.y))
+    if not("sent file" in message) or ":" in message:
+        return
+    filename = message.split(" ")[-5]
+    filepath = filedialog.asksaveasfilename(parent=root, title='Save file as', initialfile=filename)
+    create_file_receive_window(filename, filepath)
 
-#def create_file_send_window(ip, fileport, user):
-#    #Creates a window with a file selector and a send button
-#    window = Toplevel()
-#    window.geometry("200x100")
-#    window.resizable(False, False)
-#    window.title("Send a file")
-#    file_label = ttk.Label(window, text="Select a file to send")
-#    file_label.pack()
-#    file_selector = ttk.Button(window, text="Select file", command = lambda: file_label.config(text=filedialog.askopenfilename(parent=window, title='Choose a file'))).pack()
-#    send_button = ttk.Button(window, text="Send", command = lambda: send_file(ip, fileport, user, file_label.cget("text"), window)).pack()
-#    window.mainloop()
+def create_file_receive_window(filename, save_path):
+    """
+    Creates a window to receive a file from the server and show the progress on a progress bar.
+    """
+
+    def receive_and_return():
+        """
+        Internal function meant to be run on a sepparate thread so the GUI remains responsive.
+        """
+        result = client_backend.receive_file(filename, save_path, update_progress_threadsafe)
+        if result == "success":
+            messagebox.showinfo("Success", "File received successfully.", parent=window)
+        elif result == "not_connected":
+            messagebox.showerror("Error", "File port not available.", parent=window)
+        elif result == "file_not_found":
+            messagebox.showerror("Error", "The file was not found on the server.", parent=window)
+        elif result == "no_response":
+            messagebox.showerror("Error", "The server did not respond.", parent=window)
+        elif result == "transfer_error":
+            messagebox.showerror("Error", "Unknown error occurred during file transfer.", parent=window)
+        else:
+            messagebox.showerror("Error", "Unknown error occurred.", parent=window)
+        update_progress_threadsafe(0) # Reset progress bar after transfer completion or error
+
+    def update_progress_threadsafe(percentage):
+        """
+        Internal function to update the progress bar in the file receive window.
+        """
+        if window.winfo_exists():
+            window.after(0, lambda p=percentage: progress_bar.configure(value=p))
+
+    window = Toplevel()
+    window.geometry("200x50")
+    window.resizable(False, False)
+    window.title(filename)
+    progress_bar = ttk.Progressbar(window, orient='horizontal', mode='determinate', length=180)
+    progress_bar.pack(pady=10)
+    threading.Thread(target=receive_and_return, daemon=True).start()
+
+
+def create_file_send_window():
+    """
+    Creates a window to select and send a file to the server.
+    """
+    window = Toplevel()
+    window.geometry("200x100")
+    window.resizable(False, False)
+    window.title("Send a file")
+    file_label = ttk.Label(window, text="Select a file to send")
+    file_label.pack()
+    file_selector = ttk.Button(window, text="Select file", command = lambda: file_label.config(text=filedialog.askopenfilename(parent=window, title='Choose a file'))).pack()
+    send_button = ttk.Button(window, text="Send", command = lambda: on_send_click()).pack()
+    progress_bar = ttk.Progressbar(window, orient='horizontal', mode='determinate', length=180)
+    progress_bar.pack(pady=5)
+    def on_send_click():
+        """
+        Internal function called when the send button is clicked.
+        It starts a thread to send the file.
+        """
+        filepath = file_label.cget("text")
+        threading.Thread(target=send_and_return, args=(filepath, update_progress_threadsafe), daemon=True).start()
+
+    def send_and_return(filepath, update_callback):
+        """
+        Internal function meant to be run on a sepparate thread so the GUI remains responsive.
+        """
+        result = client_backend.send_file(filepath, update_callback)
+        type = result.get("type", "unknown_error")
+        if type == "success":
+            messagebox.showinfo("Success", "File sent successfully.", parent=window)
+        elif type == "not_connected":
+            messagebox.showerror("Error", "File port not available.", parent=window)
+        elif type == "file_not_found":
+            messagebox.showerror("Error", "File not found. Please select a valid file.", parent=window)
+        elif type == "no_response":
+            messagebox.showerror("Error", "The server did not respond.", parent=window)
+        elif type == "transfer_error":
+            messagebox.showerror("Error", "Unknown error occurred during file transfer.", parent=window)
+        elif type == "transfer_reject":
+            messagebox.showerror("Error", "The server rejected the file transfer. Upload a file smaller than " + str(result['max_size']) + " MB.", parent=window)
+        else:
+            messagebox.showerror("Error", "Unknown error occurred.", parent=window)
+        update_progress_threadsafe(0) # Reset progress bar after transfer completion or error
+        
+    def update_progress_threadsafe(percentage):
+        """
+        Internal function to update the progress bar in the file sending window.
+        """
+        if window.winfo_exists():
+            window.after(0, lambda p=percentage: progress_bar.configure(value=p))
+
 
 def stop_program():
     global root
@@ -133,9 +182,11 @@ def clear_root():
 
 def clear_backend_callbacks():
     client_backend.on_chat_message = None
-    client_backend.on_system_message = None
+    client_backend.on_new_client = None
+    client_backend.on_disconnected_client = None
     client_backend.on_file_notice = None
     client_backend.on_disconnect = None
+    client_backend.on_connect = None
 
 
 def schedule_on_ui(callback):
@@ -143,10 +194,49 @@ def schedule_on_ui(callback):
         root.after(0, callback)
 
 
-def show_disconnect_warning(reason):
+def show_disconnect_warning(reason, exception):
     if root is None or not root.winfo_exists():
         return
-    messagebox.showwarning("Disconnected", "Disconnected from server. Reason: " + reason, parent=root)
+    message = "Disconnected from server. Reason: "
+    if reason == "no_response":
+        message += "The server did not respond."
+    elif reason == "username_taken":
+        message += "The username is already taken."
+    elif reason == "malformed_data":
+        message += "Received malformed data from the server."
+    elif reason == "connection_error":
+        message += "Unknown connection error occurred."
+    elif reason == "send_error":
+        message += "Unknown error occurred while sending data to the server."
+    elif reason == "receive_error":
+        message += "Unknown error occurred while receiving data from the server."
+    elif reason == "closed_by_server":
+        message += "The server closed the connection."
+    else:
+        message += "Unknown reason."
+    
+    # Exception details are hidden by default, but can be shown by clicking a button
+    def toggle_exception_details():
+        """
+        Internal function to toggle the visibility of the exception details in the warning window.
+        """
+        if details_label.winfo_viewable():
+            details_label.pack_forget()
+            toggle_button.config(text="Show exception details")
+        else:
+            details_label.pack()
+            toggle_button.config(text="Hide exception details")
+    
+    # Create the warning window with the message and a button to toggle exception details
+    warning_window = Toplevel()
+    warning_window.geometry("230x200")
+    warning_window.resizable(False, False)
+    warning_window.title("Disconnected")
+    warning_label = ttk.Label(warning_window, text=message, wraplength=210).pack(pady=10)
+    if exception is not None:
+        toggle_button = ttk.Button(warning_window, text="Show exception details", command=toggle_exception_details)
+        toggle_button.pack()
+        details_label = ttk.Label(warning_window, text=str(exception), wraplength=210)
 
 
 def leave_chat():
@@ -215,7 +305,7 @@ def delete_server():
 #___________________________________________________________
 
 
-def create_menu(disconnect_reason=None):
+def create_menu(disconnect_reason=None, disconnect_exception=None):
     global root
     global server_list
     global server_listbox
@@ -248,7 +338,7 @@ def create_menu(disconnect_reason=None):
     connect_button = ttk.Button(root, text="Connect", command = lambda: connect_button_click(user_entry.get())).pack()
     enter_action = root.bind('<Return>', lambda event: connect_button_click(user_entry.get()))
     if disconnect_reason: # Warning window if the chat was closed due to server disconnection or error
-        root.after_idle(lambda reason=disconnect_reason: show_disconnect_warning(reason))
+        root.after_idle(lambda reason=disconnect_reason, exception=disconnect_exception: show_disconnect_warning(reason, exception))
 
 
 def create_chat(ip, port, name, user):
@@ -283,20 +373,20 @@ def create_chat(ip, port, name, user):
     send_button = ttk.Button(entry_frame, width = 8, text="Send", command=lambda: send_message(message_entry.get())).grid(row=0, column = 1)
     down_button = ttk.Button(entry_frame, width = 2, text="↓", command=lambda: message_list.see('end')).grid(row=0, column = 2)
     quit_button = ttk.Button(root, text="Quit", command=leave_chat).grid(row=2, column = 0)
-    #file_button = ttk.Button(root, text="Send file", command=lambda: create_file_send_window(ip, fileport, user)).grid(row=3, column = 0)
+    file_button = ttk.Button(root, text="Send file", command=lambda: create_file_send_window()).grid(row=3, column = 0)
     enter_action = root.bind('<Return>', lambda event: send_message(message_entry.get()))
-    #message_list.bind('<Double-1>', lambda event: chat_double_click(event, ip, fileport, user))
+    message_list.bind('<Double-1>', lambda event: chat_double_click(event))
     # Backend setup
     clear_backend_callbacks()
     client_backend.on_chat_message = lambda sender, content: schedule_on_ui(lambda: receive_message(sender + ": " + content))
-    client_backend.on_system_message = lambda content: schedule_on_ui(lambda: receive_message("SYSTEM: " + content))
-    client_backend.on_file_notice = lambda sender, filename: schedule_on_ui(lambda: receive_message(sender + " sent file " + filename))
-    client_backend.on_disconnect = lambda reason: schedule_on_ui(lambda: create_menu(disconnect_reason=reason))
+    client_backend.on_new_client = lambda new_username: schedule_on_ui(lambda: receive_message(new_username + " has joined the chat."))
+    client_backend.on_disconnected_client = lambda disconnected_username: schedule_on_ui(lambda: receive_message(disconnected_username + " has left the chat."))
+    client_backend.on_file_notice = lambda sender, filename: schedule_on_ui(lambda: receive_message(sender + " sent file " + filename + " (double click to save)"))
+    client_backend.on_disconnect = lambda reason, exception: schedule_on_ui(lambda: create_menu(disconnect_reason=reason, disconnect_exception=exception))
+    client_backend.on_connect = lambda clientnumber: schedule_on_ui(lambda: receive_message("Welcome to server. Currently " + str(clientnumber) + " other clients connected."))
     client_backend.connect(ip, port, user)
 
 client_backend = whatsapp3_client.Whatsapp3Client()
 root = Tk()
 create_menu()
 root.mainloop()
-
-

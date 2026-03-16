@@ -10,107 +10,182 @@ from collections import deque
 import traceback
 import json
 
-#def accept_file_connections():
-#    global file_socket
-#    global stop_program_flag
-#    #create data folder if it doesn't exist
-#    if not os.path.exists("data"):
-#        os.makedirs("data")
-#    file_socket.settimeout(1) #set timeout to check for stop_program_flag
-#    while not stop_program_flag:
-#        try:
-#            file_socket.listen()
-#            #print("Waiting for file connection")
-#            client, addr = file_socket.accept()
-#            print("New connection on file server")
-#            log("New connection on file server")
-#            #check data availability with timeout
-#            client.settimeout(1)
-#            data = client.recv(1024).decode()
-#            client.settimeout(None)
-#            if data != "WSP3": #code sent by client to identify itself as WSP3 client
-#                client.close()
-#                print("Ignoring non-WSP3 connection on file server")
-#                log("Ignoring non-WSP3 connection on file server")
-#            else:
-#                client.send("Sync".encode())
-#                username = client.recv(1024).decode()
-#                print("Connected to", username + " on file server")
-#                log("Connected to " + username + " on file server")
-#                client.send("Sync".encode())
-#                mode = client.recv(1024).decode()
-#                print("Mode:", mode)
-#                log("Mode: " + mode)
-#                client.send("Sync".encode())
-#                #Send or receive file
-#                if mode == "receive":
-#                    threading.Thread(target=send_file, args=(client,), daemon=True).start()
-#                elif mode == "send":
-#                    threading.Thread(target=receive_file, args=(client,username,), daemon=True).start()
-#        except: pass
+def accept_file_connections():
+    """
+    Loop that accepts incoming file transfer connections,
+    performs the initial handshake,
+    and starts a new thread to handle each file transfer.
+    """
+    global file_socket
+    global stop_program_flag
+    #create data folder if it doesn't exist
+    if not os.path.exists("data"):
+        os.makedirs("data")
+    file_socket.settimeout(1) #set timeout to check for stop_program_flag
+    while not stop_program_flag:
+        try:
+            file_socket.listen()
+            #print("Waiting for file connection")
+            client, addr = file_socket.accept()
+            # Check data availability
+            client.settimeout(5) # 5 second timeout for handshake data
+            reader = client.makefile('r', encoding='utf-8') # This simplifies reading lines of JSON data from the socket.
+            handshake_line = reader.readline()
+            reader.close() # Close the reader to avoid issues.
+            if not handshake_line:
+                client.close()
+                log("Ignoring non-WSP3 connection on file server (no data received)")
+                continue
+            try:
+                handshake = json.loads(handshake_line)
+            except json.JSONDecodeError:
+                client.close()
+                log("Ignoring non-WSP3 connection on file server (invalid handshake format)")
+                continue
+            if handshake.get("type") != "connect" or "username" not in handshake or "mode" not in handshake:
+                client.close()
+                log("Ignoring non-WSP3 connection on file server (invalid handshake content)")
+                continue
+            username = handshake.get("username")
+            log("Connected to " + username + " on file server")
+            mode = handshake.get("mode")
+            log("Mode: " + mode)
+            if mode not in ["send", "receive"]:
+                client.close()
+                log("Invalid mode in handshake from " + username + " on file server: " + mode)
+                continue
+            file_client_list.append(client)
+            #Send or receive file
+            if mode == "receive": # If client wants to receive file, call the function to send it
+                threading.Thread(target=send_file, args=(client,handshake,), daemon=True).start()
+            elif mode == "send": # If client sends file, call the function to receive it
+                threading.Thread(target=receive_file, args=(client, handshake,), daemon=True).start()
+        except: pass #Ignore timeout errors and continue loop to check for stop_program_flag
 
-#def receive_file(client, username):
-#    global storagelimit
-#    global client_list
-#    global chat_socket
-#    try:
-#        filename = client.recv(1024).decode()
-#        filename = filename.replace(" ", "_") #replace spaces with underscores
-#        print("Receiving file", filename)
-#        log("Receiving file " + filename)
-#        client.send("Sync".encode())
-#        filesize = int(client.recv(1024).decode())
-#        client.send("Sync".encode())
-#        #calculate storage used on folder data
-#        storageused = 0
-#        for file in os.listdir("data"):
-#            storageused += os.path.getsize("data/" + file)
-#        storageused = int(storageused / 1024 / 1024) #convert to MB
-#        filesizemb = int(filesize / 1024 / 1024) #convert to MB
-#        print("File size:", filesizemb, "MB")
-#        log("File size: " + str(filesizemb) + " MB")
-#        if storageused + filesizemb > storagelimit:
-#            #delete all files in data folder
-#            for file in os.listdir("data"):
-#                os.remove("data/" + file)
-#        #receive file
-#        with open("data/" + filename, "wb") as file:
-#            received = 0
-#            while received < filesize:
-#                data = client.recv(1024)
-#                file.write(data)
-#                received += len(data)
-#        print("File received")
-#        log("File received")
-#        for c in client_list:
-#            c.send((username + " sent file " + filename + " (double click to save)").encode())
-#    except:
-#        print("Error receiving file", filename)
-#        log("Error receiving file " + filename)
-#    finally: client.close()
+def receive_file(client, handshake):
+    global storagelimit
+    global client_dict
+    global chat_socket
+    """
+    Handles receiving a file from a client, saving it to disk, and notifying other clients about the new file.
+    Args:
+        client (socket.socket): The client socket to receive the file from.
+        handshake (dict): The handshake data received from the client, containing at least the username and mode.
+    """
+    try:
+        filename = handshake.get("filename", "unnamed_file") # Get filename from handshake, default to "unnamed_file" if not provided
+        username = handshake.get("username", "Unknown") # Get username from handshake, default to "Unknown" if not provided
+        filename = filename.replace(" ", "_") # Replace spaces with underscores to avoid issues with file paths
+        filename = filename.replace("/", "_") # Replace slashes with underscores to avoid directory traversal issues
+        filename = time.strftime("%Y%m%d%H%M%S_") + filename # Prepend timestamp to filename to avoid collisions
+        log("Receiving file " + filename)
+        filesize = int(handshake.get("filesize", 0)) # Get filesize from handshake, default to 0 if not provided
 
-#def send_file(client):
-#    try:
-#        filename = client.recv(1024).decode()
-#        print("Sending file ", filename)
-#        if not os.path.exists("data/" + filename):
-#            client.send("0".encode())
-#            print("File " + filename + " not found")
-#            log("File " + filename + " not found")
-#            return
-#        with open("data/" + filename, "rb") as file:
-#            filesize = os.path.getsize("data/" + filename)
-#            client.send(str(filesize).encode())
-#            client.recv(1024) # Sync
-#            data = file.read()
-#            client.sendall(data)
-#        print("File " + filename + " sent")
-#        log("File " + filename + " sent")
-#    except:
-#        print("Error sending file", filename)
-#        log("Error sending file " + filename)
-#    finally: client.close()
- 
+        # File size checks and storage management
+        storageused = 0
+        for file in os.listdir("data"):
+            storageused += os.path.getsize("data/" + file)
+        storageused = int(storageused / 1024 / 1024) #convert to MB
+        filesizemb = int(filesize / 1024 / 1024) #convert to MB
+        log("File size: " + str(filesizemb) + " MB")
+        if filesizemb > storagelimit:
+            log("File size exceeds storage limit. Rejecting file from " + username)
+            client.send_json({
+                "type": "transfer_reject",
+                "limit": storagelimit
+            })
+            return
+        if storageused + filesizemb > storagelimit:
+            #delete all files in data folder
+            for file in os.listdir("data"):
+                os.remove("data/" + file)
+            log("Storage limit exceeded. Deleted all files in data folder to free up space.")
+        send_json(client, {
+            "type": "transfer_accept"
+        })
+        
+        # Receive file data and save to disk
+        with open("data/" + filename, "wb") as file:
+            received = 0
+            prev_percentage = 0
+            prev_update_time = time.time()
+            while received < filesize:
+                data = client.recv(8192) # Receive data in chunks of 8KB
+                file.write(data)
+                received += len(data)
+                # To avoid slowing down the transfer, send updates every 5% or every 5 seconds
+                new_percentage = int((received / filesize) * 100)
+                if new_percentage - prev_percentage > 5 or time.time() - prev_update_time > 5:
+                    prev_percentage = new_percentage
+                    prev_update_time = time.time()
+                    send_json(client,{
+                        "type": "progress",
+                        "received": received,
+                    })
+        # Success
+        log("File received")
+        send_json(client, {
+            "type": "transfer_success"
+        })
+        message = {
+            "type": "file_notice",
+            "sender": username,
+            "filename": filename,
+            "filesize": filesize,
+            "timestamp": time.time()
+        }
+        # TODO: Add to message history (something like add_to_history(message))
+        for c in list(client_dict.keys()):
+            send_json(c, message)
+    except Exception as e:
+        log("Error receiving file " + filename)
+        # Try to notify the client about the error.
+        try:
+            send_json(client, {
+                "type": "transfer_error",
+            })
+        except:
+            pass
+        # Try to clean up any partially received file.
+        try:
+            if os.path.exists("data/" + filename):
+                os.remove("data/" + filename)
+                log("Deleted partially received file " + filename)
+        except:
+            pass
+    finally:
+        client.close()
+        if client in file_client_list:
+            file_client_list.remove(client)
+
+def send_file(client, handshake):
+    """
+    Handles sending a file to a client based on the filename specified in the handshake,
+    and notifies other clients about the file transfer.
+    """
+    try:
+        filename = handshake.get("filename", "unnamed_file") # Get filename from handshake, default to "unnamed_file" if not provided
+        if (not os.path.isfile("data/" + filename)) or "/" in filename or ".." in filename or "\\" in filename:
+            send_json(client, {
+                "type": "invalid_file",
+            })
+            log("File " + filename + " not found or invalid.")
+            return
+        send_json(client, { # Send transfer accept message with filesize
+            "type": "transfer_accept",
+            "filesize": os.path.getsize("data/" + filename)
+        })
+        client.recv(4096) # Wait for sync message from client before sending file data
+        with open("data/" + filename, "rb") as file:
+            data = file.read()
+            client.sendall(data)
+        log("Sending file " + filename)
+    except Exception as e:
+        log("Error sending file " + filename)
+    finally:
+        client.close()
+        if client in file_client_list:
+            file_client_list.remove(client)
 
 def accept_connections():
     """
@@ -131,6 +206,7 @@ def accept_connections():
             client.settimeout(5) # 5 second timeout for handshake data
             reader = client.makefile('r', encoding='utf-8') # This simplifies reading lines of JSON data from the socket.
             handshake_line = reader.readline()
+            reader.close() # Close the reader to avoid issues.
             if not handshake_line:
                 client.close()
                 log("Ignoring non-WSP3 connection (no data received)")
@@ -151,19 +227,24 @@ def accept_connections():
             response_reason = ""
             if username in client_dict.values():
                 response_status = "error"
-                response_reason = "Username already in use"
+                response_reason = "username_taken"
             response_dict = {
                 "status": response_status,
                 "reason": response_reason,
                 "file_port": config.get("fileport"),
-                "voice_port": config.get("voiceport")
+                "voice_port": config.get("voiceport"),
+                "client_number": len(client_dict)
             }
             client.send((json.dumps(response_dict) + "\n").encode('utf-8'))
             if response_status == "ok":
-                send_system_message(client, "Welcome to the server, " + username + "!")
-                send_system_message(client, "Currently " + str(len(client_dict)) + " other client(s) connected.")
-                for c in client_dict:
-                    send_system_message(c, username + " has joined the chat.")
+                message = {
+                    "type": "new_client",
+                    "username": username,
+                    "timestamp": time.time()
+                }
+                # TODO: Add to message history (something like add_to_history(message))
+                for c in list(client_dict.keys()):
+                    send_json(c, message)
                 client_dict[client] = username
                 log("Connected to " + username)
                 threading.Thread(target=receive_message_loop, args=(client, username, addr,), daemon=True).start()
@@ -205,17 +286,27 @@ def receive_message_loop(client, username, addr):
                     if msg_type == "chat":
                         sender = client_dict.get(client, "Unknown")
                         content = message.get("content")
-                for c in client_dict:
+                    else:
+                        log("Ignoring unknown message type from " + username + ": " + msg_type)
+                
+                send_message = { # Construct message to send to other clients
+                    "type": "chat",
+                    "sender": sender,
+                    "content": content,
+                    "timestamp": time.time()
+                }
+                # TODO: Add to message history (something like add_to_history(send_message))
+                for c in list(client_dict.keys()):
                     if c != client:
-                        send_chat_message(c, sender, content)
+                        send_json(c, send_message)
                 log(sender + ": " + content)
         except socket.timeout:
             continue # Ignore timeouts and continue loop to check for stop_program_flag
         except Exception as e:
-            disconnect_client(client, reason = "Client disconnected. Error details: " + str(e))
+            disconnect_client(client, reason = "Client disconnected")
             exit() # If there is an error receiving data, assume client disconnected
     
-    disconnect_client(client, reason = "Server closed connection. Error details: " + str(e))
+    disconnect_client(client, reason = "Server closed connection")
     exit()
 
 def send_json(client, data_dict):
@@ -233,34 +324,6 @@ def send_json(client, data_dict):
             client.close()
             log("Error sending data to client: " + str(e))
 
-def send_chat_message(client, sender, content):
-    """
-    Send a chat message to the specified client socket.
-    Args:
-        client (socket.socket): The client socket to send the message to.
-        sender (str): The username of the sender.
-        content (str): The text content of the chat message to send.
-    """
-    message = {
-        "type": "chat",
-        "sender": sender,
-        "content": content
-    }
-    send_json(client, message)
-
-def send_system_message(client, content):
-    """
-    Send a system message to the specified client socket.
-    Args:
-        client (socket.socket): The client socket to send the message to.
-        content (str): The text content of the system message to send.
-    """
-    message = {
-        "type": "system",
-        "content": content
-    }
-    send_json(client, message)
-
 def disconnect_client(client, reason = None):
     """
     Disconnects a client and cleans up resources.
@@ -274,9 +337,15 @@ def disconnect_client(client, reason = None):
 
     username = client_dict.get(client, "Unknown")
     if username in client_dict.values():
-        del client_dict[client]
-        for c in client_dict:
-            send_system_message(c, username + " has disconnected.")
+        client_dict.pop(client, None) # Remove client from client_dict in a thread-safe way
+        message = {
+            "type": "disconnected_client",
+            "username": username,
+            "timestamp": time.time()
+        }
+        # TODO: Add to message history (something like add_to_history(message))
+        for c in list(client_dict.keys()):
+            send_json(c, message)
         log("Disconnected from " + username + ". Reason: " + (reason if reason else "No reason provided"))
         # Additional cleanup for voice clients if necessary
         # (e.g., remove from voice_clients list, clear buffers, etc.)
@@ -423,7 +492,7 @@ def stop_program():
     print("Stopping server, closing connections...")
     stop_program_flag = True
     chat_socket.close()
-    for client in client_dict:
+    for client in list(client_dict.keys()):
         client.close()
     file_socket.close()
     for client in file_client_list:
@@ -500,8 +569,8 @@ encoders = {} # Same for encoders
 print("Starting threads...")
 accept_thread = threading.Thread(target=accept_connections, daemon=True)
 accept_thread.start()
-#file_thread = threading.Thread(target=accept_file_connections, daemon=True)
-#file_thread.start()
+file_thread = threading.Thread(target=accept_file_connections, daemon=True)
+file_thread.start()
 #voice_thread = threading.Thread(target=voice_loop, daemon=True)
 #voice_thread.start()
 #mix_thread = threading.Thread(target=mix_and_send_voice, daemon=True)
