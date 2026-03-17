@@ -14,6 +14,7 @@ import opuslib
 from collections import deque
 import numpy as np
 import uuid
+import queue
 
 class Whatsapp3Client:
 
@@ -50,9 +51,10 @@ class Whatsapp3Client:
         self.jitter_buffer = deque()
         self.buffer_state = self.BUFFER_WAIT_FILL
         # audio and codec setup
-        self.audio = pyaudio.PyAudio()
+        #self.audio = pyaudio.PyAudio()
         self.encoder = opuslib.Encoder(self.RATE, self.CHANNELS, opuslib.APPLICATION_AUDIO)
         self.decoder = opuslib.Decoder(self.RATE, self.CHANNELS)
+        self.audioqueue = queue.Queue(maxsize = 10) # Queue for the interface to put audio frames to be sent.
         self.voice_enabled = False
         self.gain = 1.0
         self.muted = False
@@ -67,6 +69,7 @@ class Whatsapp3Client:
         self.on_connect = None          # func(client_list, voice_client_list)
         self.on_new_voice_client = None       # func(new_username)
         self.on_disconnected_voice_client = None  # func(disconnected_username)
+        self.onaudioframe = None           # func(frame)
 
     def connect(self, server_ip, chat_port, username):
         """
@@ -240,10 +243,9 @@ class Whatsapp3Client:
 
     def _voice_play_loop(self):
         """
-        Plays voice data from the buffer through the audio output.
+        Sends audio frames to the interface for playback or other processing.
         Also manages buffer state changes when emptying, management when filling is done in the receive loop.
         """
-        stream = self.audio.open(format=self.FORMAT, channels=self.CHANNELS, rate=self.RATE, output=True, frames_per_buffer=self.CHUNK)
         while self.voice_enabled and self.running:
             #start_time = time.time()
             try:
@@ -262,26 +264,31 @@ class Whatsapp3Client:
                     frame = ((frame1 + frame2) / 2).astype(np.int16).tobytes()
                     if len(self.jitter_buffer) <= self.JITTER_BUFFER_OPTIMAL:
                         self.buffer_state = self.BUFFER_RUNNING
-                stream.write(frame)
+                if self.onaudioframe: self.onaudioframe(frame) # Send raw audio frame to interface for playing or other processing
                 #print("Voice play loop time: " + str(time.time() - start_time))
             except Exception as e: pass #print("Error playing voice data: " + str(e))
         #print("Voice chat ended")
-        stream.close()
 
     def _voice_send_loop(self):
-        stream = self.audio.open(format=self.FORMAT, channels=self.CHANNELS, rate=self.RATE, input=True, frames_per_buffer=self.CHUNK)
+        """
+        Sends audio frames from the interface to the server.
+        """
+        next_loop_timing = time.time()
         while self.voice_enabled and self.running:
-            #start_time = time.time()
             try:
-                frame = stream.read(self.CHUNK, exception_on_overflow=False)
+                frame = self.audioqueue.get(timeout = 1) # Get raw audio frame from interface, with timeout to allow periodic checks of the running flag
                 frame = (np.frombuffer(frame, np.int16) * self.gain).astype(np.int16).tobytes() # Apply gain
                 if  not self.muted:
                     encoded_frame = self.encoder.encode(frame, self.CHUNK)
-                    #print("Voice read loop time: " + str(time.time() - start_time))
                     self.voice_socket.sendto(self.voice_id + encoded_frame, self.voiceaddr)
             except Exception as e: pass #print("Error sending voice data: " + str(e))
-        #print("Voice chat ended")
-        stream.close()
+        # Timing management to maintain consistent frame sending intervals (20 ms per frame)
+        next_loop_timing += 0.02 # Aim for 20 ms per frame
+        sleep_time = next_loop_timing - time.time()
+        if sleep_time > 0: # Sleep until next frame time.
+            time.sleep(sleep_time)
+        else: # If we're behind schedule, skip sleeping to catch up, and reset the timing to avoid drift.
+            next_loop_timing = time.time()
 
     def _receive_loop(self):
         """

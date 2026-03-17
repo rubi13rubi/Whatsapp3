@@ -68,12 +68,12 @@ An interface will appear, and you will be asked to select a server. If this is y
 3. Click "add". You should see your added server on the interface. The client will create a file named server_list.json. This file contains the information of added servers. It needs to be in the same folder as the executable to work, otherwise the information will be lost and a new json will be created.
 4. To connect to your server, click it to select it, enter a username on the text field and click "connect" (or press enter).
 
-If everything worked, you should see another interface with box where all messages are displayed. If the server is online and the ip is correct, you should see a welcome message and the number of connected users. If you instead see "error connecting to server", check that the server is running, the ip is correct, and no firewall is blocking the traffic.
+If everything worked, you should see another interface with box where all messages are displayed. If the server is online and the ip is correct, you should see a welcome message and the number of connected users and voice users. If you instead see "error connecting to server", check that the server is running, the ip is correct, and no firewall is blocking the traffic.
 
 - To **send a message**, type it in the chat box and click "send" (or press enter)
-- To **send a file**, click "send file", select a file and click "send". Do not disconnect from the server until you see a confirmation message saying that your file is sent. Otherwise, your transfer will be cancelled.
-- To **download a file** sent by another user, double click the message of the file. You will be prompted with a window asking where would you like to save the file and the name of it. Once you select it you will start downloading the file. Do not try to open the file or disconnect from the server until you see a confirmation message saying your file has been downloaded.
-- To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own value. To mute or unmute your microphone, type "/mute". To leave the voice chat, type "/voice" again.
+- To **send a file**, click "send file", select a file and click "send". The transfer progress will be shown in a progress bar. Do not disconnect from the server until your file has been sent. Otherwise, your transfer will be cancelled.
+- To **download a file** sent by another user, double click the message of the file. You will be prompted with a window asking where would you like to save the file and the name of it. Once you select it you will start downloading the file and show the download progress in a progress bar on a separate window. Do not try to open the file or disconnect from the server until the file has downloaded completely.
+- To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own gain. To mute or unmute your microphone, type "/mute". To leave the voice chat, type "/voice" again.
 
 ## Opus error
 
@@ -107,20 +107,20 @@ pyinstaller --onefile --noconsole whatsapp3.py
 ```
 The command will automatically include the opus .dll files on the executable so it can work as a single file. If the opus binaries are not in the same folder when compiling, you will have an error when executing the .exe. When the proccess ends,a bunch of folders and files will have been created. You can find the .exe on the dist folder.
 
-## Project future / contribution
+## Project state / future / contribution
 
 As this was a "for fun" project, I am not very invested in maintaining and adding features. However, I plan to add some features, including:
 
-- Bug fixes, cleaning code and stability improvement
 - Retreive chat history on clients
-- Encryption (probably client-server and server-client)
-- Improved user interface
-- Mobile application support for Android
-- Chat history recovery
-- Better management of files
 - Video chat / sharing screen
+- Improved user interface
+- Client interface for Android
+- Encryption (probably client-server and server-client)
 
 This list does not imply all features will be added, but I will probably be slowly adding some of it.
+
+Currently, the project has received a huge update to the logic and backend that will make many of the mentioned features relatively easy to implement. I will keep working on making the code scalable and improving documentation to make custom interfaces or bots easy to code and maintain.
+
 I do not plan to add contributors, but issues reporting and suggestions will be very useful.
 
 ## Credits

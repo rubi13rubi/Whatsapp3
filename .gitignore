@@ -8,3 +8,7 @@ src/server/config.json
 src/client/build
 src/client/dist
 src/client/whatsapp3.spec
+
+# Python cache files
+src/client/__pycache__
+src/server/__pycache__

@@ -42,6 +42,9 @@ def receive_message(message):
 def send_message(message):
     global message_list
     global message_entry
+    global instream
+    global outstream
+    global client_backend
 
     message_entry.delete(0, 'end')
 
@@ -49,12 +52,83 @@ def send_message(message):
         return
     
     if message == "/voice":
-        client_backend.voice_toggle()
+        if client_backend.voice_enabled:
+            client_backend.voice_toggle()
+            message_list.insert(END, "You have left the voice chat.")
+            message_list.see('end')
+        else:
+            instream = audio.open(format=client_backend.FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)
+            outstream = audio.open(format=client_backend.FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, output=True, frames_per_buffer=client_backend.CHUNK)
+            client_backend.voice_toggle()
+            threading.Thread(target=get_microphone_data, daemon=True).start()
+            message_list.insert(END, "You have joined the voice chat.")
+            message_list.see('end')
+        return
+
+    if message == "/mute":
+        if client_backend.voice_enabled:
+            if client_backend.muted:
+                client_backend.muted = False
+                message_list.insert(END, "You have unmuted yourself.")
+                message_list.see('end')
+            else:
+                client_backend.muted = True
+                message_list.insert(END, "You have muted yourself.")
+                message_list.see('end')
+        else:
+            message_list.insert(END, "You are not in the voice chat.")
+            message_list.see('end')
+        return
+    
+    if message.startswith("/gain"):
+        if client_backend.voice_enabled:
+            try:
+                gain_value = float(message.split(" ")[1])
+                client_backend.gain = gain_value
+                message_list.insert(END, "Your voice gain has been set to " + str(gain_value) + ".")
+                message_list.see('end')
+            except:
+                message_list.insert(END, "Invalid gain value. Usage: /gain [value]")
+                message_list.see('end')
+        else:
+            message_list.insert(END, "You are not in the voice chat.")
+            message_list.see('end')
         return
 
     message_list.insert(END, "YOU: " + message)
     message_list.see('end')
     client_backend.send_chat_message(message)
+
+def get_microphone_data():
+    """
+    Get frames of audio data from the microphone and send them to the client backend to be transmitted to the server.
+    """
+    global client_backend
+    global instream
+    global outstream
+    global audio
+
+    while client_backend.voice_enabled and client_backend.running:
+        try:
+            frame = instream.read(client_backend.CHUNK, exception_on_overflow=False)
+            client_backend.audioqueue.put(frame)
+        except Exception as e: pass #print("Error reading microphone data: " + str(e))
+    instream.stop_stream()
+    instream.close()
+    outstream.stop_stream()
+    outstream.close()
+
+def play_audio_frame(frame):
+    """
+    Play a raw audio frame through the audio output.
+    """
+    global audio
+    global outstream
+
+    try:
+        outstream.write(frame)
+    except Exception as e: pass #print("Error playing audio frame: " + str(e))
+    
 
 
 # ___________________________________________________________
@@ -165,8 +239,10 @@ def create_file_send_window():
 
 def stop_program():
     global root
+    global audio
     clear_backend_callbacks()
     client_backend.disconnect()
+    audio.terminate()
     if root is not None and root.winfo_exists():
         root.destroy()
 
@@ -194,6 +270,7 @@ def clear_backend_callbacks():
     client_backend.on_connect = None
     client_backend.on_new_voice_client = None
     client_backend.on_disconnected_voice_client = None
+    client_backend.onaudioframe = None
 
 
 def schedule_on_ui(callback):
@@ -326,7 +403,7 @@ def create_menu(disconnect_reason=None, disconnect_exception=None):
     root.grid_columnconfigure(0, weight=1)
     root.title("Whatsapp 3")
     root.protocol("WM_DELETE_WINDOW", stop_program)
-    welcometext = ttk.Label(root, text="Welcome to Whatsapp 3. \n Select a server and click connect or add a new server", anchor="center", justify="center").pack()
+    welcometext = ttk.Label(root, text="Welcome to Whatsapp 3 (v2.0). \n Select a server and click connect or add a new server", anchor="center", justify="center").pack()
     try: server_list = json.loads(open("server_list.json").read())
     except: server_list = []
     scroll = ttk.Scrollbar(root)
@@ -393,9 +470,11 @@ def create_chat(ip, port, name, user):
     client_backend.on_connect = lambda clientlist, voice_clientlist: schedule_on_ui(lambda: receive_message("Welcome to server. Currently " + str(len(clientlist)) + " other clients connected (" + str(len(voice_clientlist)) + " in voice chat)."))
     client_backend.on_new_voice_client = lambda new_username: schedule_on_ui(lambda: receive_message(new_username + " has joined the voice chat."))
     client_backend.on_disconnected_voice_client = lambda disconnected_username: schedule_on_ui(lambda: receive_message(disconnected_username + " has left the voice chat."))
+    client_backend.onaudioframe = lambda frame: play_audio_frame(frame)
     client_backend.connect(ip, port, user)
 
 client_backend = whatsapp3_client.Whatsapp3Client()
+audio = pyaudio.PyAudio()
 root = Tk()
 create_menu()
 root.mainloop()
