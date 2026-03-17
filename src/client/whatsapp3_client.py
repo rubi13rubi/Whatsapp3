@@ -41,7 +41,8 @@ class Whatsapp3Client:
         self.chat_socket = None
         self._recv_buffer = b"" # stores incomplete JSON lines between recv calls
         self.file_port = None # File socket not declared as a new socket is used for each file transfer
-        self.voice_port = None
+        self.file_sockets = [] # List to keep track of active file transfer sockets for cleanup on disconnect
+        self.voice_addr = None
         self.voice_socket = None
         self.username = None
         self.running = False
@@ -63,7 +64,9 @@ class Whatsapp3Client:
         self.on_disconnected_client = None  # func(disconnected_username)
         self.on_file_notice = None      # func(sender, filename)
         self.on_disconnect = None       # func(forced)
-        self.on_connect = None          # func(clientnumber)
+        self.on_connect = None          # func(client_list, voice_client_list)
+        self.on_new_voice_client = None       # func(new_username)
+        self.on_disconnected_voice_client = None  # func(disconnected_username)
 
     def connect(self, server_ip, chat_port, username):
         """
@@ -97,12 +100,13 @@ class Whatsapp3Client:
             response = json.loads(response_line)
             if response.get("status") == "ok":
                 self.file_port = int(response.get("file_port"))
-                self.voice_port = int(response.get("voice_port"))
+                voice_port = int(response.get("voice_port"))
+                self.voiceaddr = (self.server_ip, int(voice_port))
                 # Start the message listener thread after successful connection
                 self.running = True
                 threading.Thread(target=self._receive_loop, daemon=True).start()
                 if self.on_connect:
-                    self.on_connect(response.get("client_number"))
+                    self.on_connect(response.get("client_list"), response.get("voice_client_list"))
                 return
             else:
                 if response.get("reason") == "username_taken":
@@ -147,7 +151,7 @@ class Whatsapp3Client:
         self.server_ip = None
         self.chat_port = None
         self.file_port = None
-        self.voice_port = None
+        self.voice_addr = None
         self.username = None
         self.buffer_state = self.BUFFER_WAIT_FILL
         self.jitter_buffer.clear()
@@ -162,6 +166,10 @@ class Whatsapp3Client:
             try: self.voice_socket.close()
             except: pass
             self.voice_socket = None
+        for file_socket in self.file_sockets:
+            try: file_socket.close()
+            except: pass
+        self.file_sockets.clear()
         if self.on_disconnect:
             self.on_disconnect(reason, exception)
     
@@ -176,6 +184,104 @@ class Whatsapp3Client:
             "content": content
         }
         self._send_json(message)
+    
+    def voice_toggle(self):
+        """
+        Enables or disables voice chat for this client.
+        When enabled, the client will start sending audio data to the server and processing incoming audio data.
+        """
+        if self.voice_enabled:
+            self.voice_enabled = False
+            try: 
+                self.voice_socket.close()
+            except: pass
+            
+            message = {
+                "type": "voice_disconnect",
+                "voice_id": self.voice_id.hex()
+            }
+        else:
+            self.voice_enabled = True
+
+            my_ip = self.chat_socket.getsockname()[0]
+            self.voice_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Socket for voice data
+            self.voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Allow reuse of address
+            self.voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
+            self.voice_socket.bind((my_ip, 0)) # Bind to a random port
+
+            threading.Thread(target=self._voice_rcv_loop, daemon=True).start()
+            threading.Thread(target=self._voice_send_loop, daemon=True).start()
+            threading.Thread(target=self._voice_play_loop, daemon=True).start()
+
+            message = {
+                "type": "voice_connect",
+                "voice_id": self.voice_id.hex()
+            }
+        self._send_json(message)
+
+    def _voice_rcv_loop(self):
+        """
+        Receives voice data from the server and store it in the buffer.
+        Also manages buffer state changes when filling.
+        """
+        while self.voice_enabled and self.running:
+            try:
+                data, addr = self.voice_socket.recvfrom(4096)
+
+                if addr == self.voiceaddr:
+                    decoded_frame = self.decoder.decode(data, self.CHUNK)
+                    self.jitter_buffer.append(decoded_frame)
+                    # Buffer state management when filling, management when emptying is done in the play loop
+                    if self.buffer_state == self.BUFFER_WAIT_FILL and len(self.jitter_buffer) >= self.JITTER_BUFFER_OPTIMAL:
+                        self.buffer_state = self.BUFFER_RUNNING
+                    elif len(self.jitter_buffer) >= self.JITTER_BUFFER_MAX:
+                        self.buffer_state = self.BUFFER_WAIT_DRAIN
+            except: pass
+
+    def _voice_play_loop(self):
+        """
+        Plays voice data from the buffer through the audio output.
+        Also manages buffer state changes when emptying, management when filling is done in the receive loop.
+        """
+        stream = self.audio.open(format=self.FORMAT, channels=self.CHANNELS, rate=self.RATE, output=True, frames_per_buffer=self.CHUNK)
+        while self.voice_enabled and self.running:
+            #start_time = time.time()
+            try:
+                # Buffer state management when emptying, management when filling is done in the receive loop
+                if len(self.jitter_buffer) == 0:
+                    self.buffer_state = self.BUFFER_WAIT_FILL
+                if self.buffer_state == self.BUFFER_WAIT_FILL: # If buffer is too empty, play silence
+                    frame = b'\x00' * self.CHUNK * 2
+                elif self.buffer_state == self.BUFFER_RUNNING: # If buffer is running correctly, play one frame
+                    frame = self.jitter_buffer.popleft()
+                elif self.buffer_state == self.BUFFER_WAIT_DRAIN: # If buffer is too full, mix two frames
+                    frame1 = self.jitter_buffer.popleft()
+                    frame2 = self.jitter_buffer.popleft()
+                    frame1 = np.frombuffer(frame1, np.int16)
+                    frame2 = np.frombuffer(frame2, np.int16)
+                    frame = ((frame1 + frame2) / 2).astype(np.int16).tobytes()
+                    if len(self.jitter_buffer) <= self.JITTER_BUFFER_OPTIMAL:
+                        self.buffer_state = self.BUFFER_RUNNING
+                stream.write(frame)
+                #print("Voice play loop time: " + str(time.time() - start_time))
+            except Exception as e: pass #print("Error playing voice data: " + str(e))
+        #print("Voice chat ended")
+        stream.close()
+
+    def _voice_send_loop(self):
+        stream = self.audio.open(format=self.FORMAT, channels=self.CHANNELS, rate=self.RATE, input=True, frames_per_buffer=self.CHUNK)
+        while self.voice_enabled and self.running:
+            #start_time = time.time()
+            try:
+                frame = stream.read(self.CHUNK, exception_on_overflow=False)
+                frame = (np.frombuffer(frame, np.int16) * self.gain).astype(np.int16).tobytes() # Apply gain
+                if  not self.muted:
+                    encoded_frame = self.encoder.encode(frame, self.CHUNK)
+                    #print("Voice read loop time: " + str(time.time() - start_time))
+                    self.voice_socket.sendto(self.voice_id + encoded_frame, self.voiceaddr)
+            except Exception as e: pass #print("Error sending voice data: " + str(e))
+        #print("Voice chat ended")
+        stream.close()
 
     def _receive_loop(self):
         """
@@ -232,7 +338,14 @@ class Whatsapp3Client:
             filename = message.get("filename")
             if self.on_file_notice:
                 self.on_file_notice(sender, filename)
-
+        elif msg_type == "new_voice_client":
+            new_username = message.get("username")
+            if self.on_new_voice_client:
+                self.on_new_voice_client(new_username)
+        elif msg_type == "disconnected_voice_client":
+            disconnected_username = message.get("username")
+            if self.on_disconnected_voice_client:
+                self.on_disconnected_voice_client(disconnected_username)
     def send_file(self, filepath, update_callback = None):
         """
         Initiates a file transfer to the server for the specified file.
@@ -259,6 +372,7 @@ class Whatsapp3Client:
         # Connect to the file transfer port and send the file
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as file_socket:
+                self.file_sockets.append(file_socket) # Keep track of this socket for cleanup on disconnect
                 file_socket.settimeout(5) # 5 second timeout for connection
                 file_socket.connect((self.server_ip, self.file_port))
                 # Send handshake with filename and filesize
@@ -302,6 +416,8 @@ class Whatsapp3Client:
         except Exception as e:
             return {"type": "transfer_error"}
         finally:
+            if file_socket in self.file_sockets:
+                self.file_sockets.remove(file_socket) # Remove from active sockets list
             file_socket.close()
             reader.close()
 
@@ -326,6 +442,7 @@ class Whatsapp3Client:
         # Connect to the file transfer port and send the file
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as file_socket:
+                self.file_sockets.append(file_socket) # Keep track of this socket for cleanup on disconnect
                 file_socket.settimeout(5) # 5 second timeout for connection
                 file_socket.connect((self.server_ip, self.file_port))
                 # Send handshake with filename and filesize
@@ -370,5 +487,7 @@ class Whatsapp3Client:
         except Exception as e:
             return "transfer_error"
         finally:
+            if file_socket in self.file_sockets:
+                self.file_sockets.remove(file_socket) # Remove from active sockets list
             file_socket.close()
             reader.close()

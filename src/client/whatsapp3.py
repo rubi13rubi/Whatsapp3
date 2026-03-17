@@ -43,11 +43,16 @@ def send_message(message):
     global message_list
     global message_entry
 
+    message_entry.delete(0, 'end')
+
     if message_list is None or message_entry is None or message.strip() == "":
+        return
+    
+    if message == "/voice":
+        client_backend.voice_toggle()
         return
 
     message_list.insert(END, "YOU: " + message)
-    message_entry.delete(0, 'end') #clear the entry box
     message_list.see('end')
     client_backend.send_chat_message(message)
 
@@ -187,6 +192,8 @@ def clear_backend_callbacks():
     client_backend.on_file_notice = None
     client_backend.on_disconnect = None
     client_backend.on_connect = None
+    client_backend.on_new_voice_client = None
+    client_backend.on_disconnected_voice_client = None
 
 
 def schedule_on_ui(callback):
@@ -383,7 +390,9 @@ def create_chat(ip, port, name, user):
     client_backend.on_disconnected_client = lambda disconnected_username: schedule_on_ui(lambda: receive_message(disconnected_username + " has left the chat."))
     client_backend.on_file_notice = lambda sender, filename: schedule_on_ui(lambda: receive_message(sender + " sent file " + filename + " (double click to save)"))
     client_backend.on_disconnect = lambda reason, exception: schedule_on_ui(lambda: create_menu(disconnect_reason=reason, disconnect_exception=exception))
-    client_backend.on_connect = lambda clientnumber: schedule_on_ui(lambda: receive_message("Welcome to server. Currently " + str(clientnumber) + " other clients connected."))
+    client_backend.on_connect = lambda clientlist, voice_clientlist: schedule_on_ui(lambda: receive_message("Welcome to server. Currently " + str(len(clientlist)) + " other clients connected (" + str(len(voice_clientlist)) + " in voice chat)."))
+    client_backend.on_new_voice_client = lambda new_username: schedule_on_ui(lambda: receive_message(new_username + " has joined the voice chat."))
+    client_backend.on_disconnected_voice_client = lambda disconnected_username: schedule_on_ui(lambda: receive_message(disconnected_username + " has left the voice chat."))
     client_backend.connect(ip, port, user)
 
 client_backend = whatsapp3_client.Whatsapp3Client()
