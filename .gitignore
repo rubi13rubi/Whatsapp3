@@ -3,6 +3,7 @@ src/client/server_list.json
 src/server/data
 src/server/log.txt
 src/server/config.json
+src/client/url_cache.json
 
 # Build files
 src/client/build

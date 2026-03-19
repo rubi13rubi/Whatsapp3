@@ -54,7 +54,7 @@ class Whatsapp3Client:
         #self.audio = pyaudio.PyAudio()
         self.encoder = opuslib.Encoder(self.RATE, self.CHANNELS, opuslib.APPLICATION_AUDIO)
         self.decoder = opuslib.Decoder(self.RATE, self.CHANNELS)
-        self.audioqueue = queue.Queue(maxsize = 10) # Queue for the interface to put audio frames to be sent.
+        self.audioqueue = queue.Queue(maxsize = 5) # Queue for the interface to put audio frames to be sent.
         self.voice_enabled = False
         self.gain = 1.0
         self.muted = False
@@ -69,7 +69,7 @@ class Whatsapp3Client:
         self.on_connect = None          # func(client_list, voice_client_list)
         self.on_new_voice_client = None       # func(new_username)
         self.on_disconnected_voice_client = None  # func(disconnected_username)
-        self.onaudioframe = None           # func(frame)
+        self.on_audio_frame = None           # func(frame)
 
     def connect(self, server_ip, chat_port, username):
         """
@@ -212,9 +212,10 @@ class Whatsapp3Client:
             self.voice_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 0) # Disable broadcast
             self.voice_socket.bind((my_ip, 0)) # Bind to a random port
 
-            threading.Thread(target=self._voice_rcv_loop, daemon=True).start()
             threading.Thread(target=self._voice_send_loop, daemon=True).start()
-            threading.Thread(target=self._voice_play_loop, daemon=True).start()
+            if self.on_audio_frame:
+                threading.Thread(target=self._voice_play_loop, daemon=True).start()
+                threading.Thread(target=self._voice_rcv_loop, daemon=True).start()
 
             message = {
                 "type": "voice_connect",
@@ -264,7 +265,7 @@ class Whatsapp3Client:
                     frame = ((frame1 + frame2) / 2).astype(np.int16).tobytes()
                     if len(self.jitter_buffer) <= self.JITTER_BUFFER_OPTIMAL:
                         self.buffer_state = self.BUFFER_RUNNING
-                if self.onaudioframe: self.onaudioframe(frame) # Send raw audio frame to interface for playing or other processing
+                self.on_audio_frame(frame) # Send raw audio frame to interface for playing or other processing
                 #print("Voice play loop time: " + str(time.time() - start_time))
             except Exception as e: pass #print("Error playing voice data: " + str(e))
         #print("Voice chat ended")
@@ -272,8 +273,9 @@ class Whatsapp3Client:
     def _voice_send_loop(self):
         """
         Sends audio frames from the interface to the server.
+        Time management should be done by the interface to ensure frames are sent at the correct intervals,
+        this loop just sends frames as they come in from the interface.
         """
-        next_loop_timing = time.time()
         while self.voice_enabled and self.running:
             try:
                 frame = self.audioqueue.get(timeout = 1) # Get raw audio frame from interface, with timeout to allow periodic checks of the running flag
@@ -282,14 +284,7 @@ class Whatsapp3Client:
                     encoded_frame = self.encoder.encode(frame, self.CHUNK)
                     self.voice_socket.sendto(self.voice_id + encoded_frame, self.voiceaddr)
             except Exception as e: pass #print("Error sending voice data: " + str(e))
-        # Timing management to maintain consistent frame sending intervals (20 ms per frame)
-        next_loop_timing += 0.02 # Aim for 20 ms per frame
-        sleep_time = next_loop_timing - time.time()
-        if sleep_time > 0: # Sleep until next frame time.
-            time.sleep(sleep_time)
-        else: # If we're behind schedule, skip sleeping to catch up, and reset the timing to avoid drift.
-            next_loop_timing = time.time()
-
+    
     def _receive_loop(self):
         """
         The main loop for receiving messages from the server.

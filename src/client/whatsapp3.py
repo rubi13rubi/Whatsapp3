@@ -470,7 +470,7 @@ def create_chat(ip, port, name, user):
     client_backend.on_connect = lambda clientlist, voice_clientlist: schedule_on_ui(lambda: receive_message("Welcome to server. Currently " + str(len(clientlist)) + " other clients connected (" + str(len(voice_clientlist)) + " in voice chat)."))
     client_backend.on_new_voice_client = lambda new_username: schedule_on_ui(lambda: receive_message(new_username + " has joined the voice chat."))
     client_backend.on_disconnected_voice_client = lambda disconnected_username: schedule_on_ui(lambda: receive_message(disconnected_username + " has left the voice chat."))
-    client_backend.onaudioframe = lambda frame: play_audio_frame(frame)
+    client_backend.on_audio_frame = lambda frame: play_audio_frame(frame)
     client_backend.connect(ip, port, user)
 
 client_backend = whatsapp3_client.Whatsapp3Client()
