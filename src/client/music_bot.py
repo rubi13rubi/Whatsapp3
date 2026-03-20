@@ -96,6 +96,7 @@ def play_music(command_text):
         return
     print("Direct URL extracted. Starting subprocess to convert audio stream...")
     client_backend.send_chat_message(f"Playing: {title}")
+    playing = True
 
     # Use ffmpeg to convert the audio stream to a format suitable for streaming
     ffmpeg_command = [
@@ -180,7 +181,6 @@ def on_message(sender, message):
         else:
             command_text = message[6:].strip() # Get the text after the "!play " command
             print(f"Received play command for: {command_text}")
-            playing = True
             threading.Thread(target=play_music, args=(command_text,), daemon=True).start() # Start playing music in a separate thread
     elif message == "!stop":
         print("Received stop command.")
