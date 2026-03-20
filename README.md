@@ -93,7 +93,7 @@ sudo yum install opus
 
 ## Music bot
 
-To test the new client capabilities, I programmed a bot that connects as a client and waits for a !play command with a youtube link to play the audio from any youtube video through the voice chat. It is included on the client files, but it requires some setup before starting it.
+To test the new client capabilities, I programmed a bot that connects as a client and waits for a !play command with a youtube link or a search querry to play the audio from any youtube video through the voice chat. It is included on the client files, but it requires some setup before starting it.
 
 First, install the yt_dlp python library:
 ```
@@ -117,11 +117,7 @@ With all installed, simply run:
 ```
 python3 music_bot.py
 ```
-Insert the server ip and port and enjoy.
-
-- Use !play followed by a YouTube link to start playing the audio from that video.
-- Use !stop to stop playback (so you can start playing another audio).
-- Use !volume followed by a value between 0 and 2 (1 is the default) to change the music bot gain value.
+Insert the server ip and port and enjoy. Use `!help` command to see all available commands.
 
 > **_NOTE:_**  You will notice the bot takes too long to start playing the song. This will only happen the first time for each video as extracting the url is a long process. The bot saves a local cache to avoid requesting the url for already played videos, and updates it if the catched url no longer works. Also the music quality is low due to the audio codec being designed for human voice and not for music.
 
