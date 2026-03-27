@@ -9,7 +9,6 @@ import socket
 import json
 from math import ceil, sqrt
 import threading
-import pyaudio
 import opuslib
 from collections import deque
 import numpy as np
@@ -19,7 +18,6 @@ import queue
 class Whatsapp3Client:
 
     # audio parameters
-    FORMAT = pyaudio.paInt16
     CHANNELS = 1
     RATE = 16000 # 16000 Hz (samples per second)
     CHUNK = 320 # 320 samples per frame (640 bytes), 20 ms per frame
@@ -65,7 +63,7 @@ class Whatsapp3Client:
         self.on_new_client = None       # func(new_username)
         self.on_disconnected_client = None  # func(disconnected_username)
         self.on_file_notice = None      # func(sender, filename)
-        self.on_disconnect = None       # func(forced)
+        self.on_disconnect = None       # func(reason, exception)
         self.on_connect = None          # func(client_list, voice_client_list)
         self.on_new_voice_client = None       # func(new_username)
         self.on_disconnected_voice_client = None  # func(disconnected_username)
@@ -285,6 +283,17 @@ class Whatsapp3Client:
                     self.voice_socket.sendto(self.voice_id + encoded_frame, self.voiceaddr)
             except Exception as e: pass #print("Error sending voice data: " + str(e))
     
+    def change_gain(self, volumevalue):
+        """
+        Changes the gain for outgoing voice data, given a volume value.
+        The value is converted from logarithmic scale to linear gain.
+        Args:
+            volumevalue (float): The volume value in logarithmic scale, where 1 is the default level and 0 is silence.
+        """
+        if volumevalue <= 0: self.gain = 0
+        else: self.gain = pow(10, (volumevalue - 1) * 2) # Convert from logarithmic scale to linear gain
+        
+
     def _receive_loop(self):
         """
         The main loop for receiving messages from the server.

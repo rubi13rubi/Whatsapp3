@@ -203,7 +203,7 @@ def on_message(sender, message):
         try:
             volume = float(message.split(" ")[1])
             if 0 <= volume <= 2.0: # Allow volume values between 0 (mute) and 2 (double volume)
-                client_backend.gain = volume # Set the gain in the client backend to adjust the volume
+                client_backend.change_gain(volume) # Change the gain in the client backend to adjust the volume
                 client_backend.send_chat_message(f"Volume set to {volume}.") # Send confirmation message to chat
             else:
                 client_backend.send_chat_message("Invalid volume. Please specify a value between 0 and 2.")

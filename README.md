@@ -47,6 +47,8 @@ Additionally, the server will save everything in a log file with timestamps, so 
 
 The client has been tested on Windows, and **.exe files are included on releases**. Unlike the server, client files have been compiled with all dependencies packed inside, so everything you need to do is download the .exe file. Make sure you use the same release of client and server. Some versions may be compatible, but you may find unexpected errors.
 
+The **new client interface** is packed on a .zip file named whatsapp3_ft.exe. The new interface offers a much better user experience, although you need to always keep the full folder.
+
 ### Alternative: running from source
 
 Alternatively, you can also download the source and run it with python. This can be used to run the client on Linux, although you will have some issues with the interface and the audio quality will be worse. If you want to do this, you will have to download the full client folder from src, as it includes all the necessary files that are normally packed in the .exe. Also, you will need to install the requirements opening a terminal on the client folder and running:
@@ -74,6 +76,24 @@ If everything worked, you should see another interface with box where all messag
 - To **send a file**, click "send file", select a file and click "send". The transfer progress will be shown in a progress bar. Do not disconnect from the server until your file has been sent. Otherwise, your transfer will be cancelled.
 - To **download a file** sent by another user, double click the message of the file. You will be prompted with a window asking where would you like to save the file and the name of it. Once you select it you will start downloading the file and show the download progress in a progress bar on a separate window. Do not try to open the file or disconnect from the server until the file has downloaded completely.
 - To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own gain. To mute or unmute your microphone, type "/mute". To leave the voice chat, type "/voice" again.
+
+## New client setup and usage
+
+The new client has a much modern interface, built with flet. You can also run from source using:
+```
+python3 whatsapp3_ft.py
+```
+An interface will appear, and you will be asked to select a server. If this is your first time using the client, you will need to add a new server to use it.
+1. Click "add server".
+2. Enter the details. Note that if you are using a server through internet and not a local network, the ip you need to enter here is the public ip, and you should have all 3 ports properly forwarded and open to the internet on the server router. The port that you need to enter is the chat port (called just "port" on the server settings file). Other ports are obtained automatically when you connect to the server. The name is just for listing and remembering purposes and you can put whatever you want there.
+3. Click "add". You should see your added server on the interface. If you are running the executable, the json files will be created on a special folder on appdata, so you don't have to worry about them being on the same folder.
+
+If everything worked, you should see a bigger window, with 3 different parts: The message box, the clients list, and the voice clients list.
+
+- To **send a message**, type it in the chat box and click the send button (or press enter).
+- To **send a file**, click the clip button on the side of the send button. You will be prompted with a file selector, and after selecting the file you will see a progress bar on the chat box. Do not disconnect until the transfer is complete or it will be cancelled.
+- To **download a file** sent by another user, click the download button on the message. You will be prompted with a selector where you can decide the name and location of the file, after which the download will begin. Do not try to open the file or disconnect from the server until the file has downloaded completely.
+- To use **voice chat**, click the "Connect to voice chat" button. You will see that your user gets added to voice chat, and 3 buttons appear. The first one will disconnect you from the voice chat, the second one will allow you to mute/unmute yourself, and the last one will open a menu where you can configure the input/output devices and your gain (input volume).
 
 ## Opus error
 
@@ -137,13 +157,36 @@ pyinstaller --onefile --noconsole whatsapp3.py
 ```
 The command will automatically include the opus .dll files on the executable so it can work as a single file. If the opus binaries are not in the same folder when compiling, you will have an error when executing the .exe. When the proccess ends,a bunch of folders and files will have been created. You can find the .exe on the dist folder.
 
+### Compiling the new interface
+
+Compiling with flet is harder, as it involves dealing with flutter and many dependencies and project structures. As this project is not a main flet project, I found the best way to compile the new interface is to copy the files to a separate project.
+
+1. Create an empty folder, and run `flet create Whatsapp3_ft`
+2. The project will be created, now edit the `pyproject.toml` file, and add the following dependencies:
+```
+"numpy",
+"opuslib",
+"PyAudio"
+```
+3. On src, copy the following files/folders from the repository:
+```
+whatsapp3_ft.py (rename it to main.py)
+whatsapp3_client.py
+libgcc_s_seh-1.dll
+libwinpthread-1.dll
+opus.dll
+assets
+```
+4. Open a terminal as administrator on the root folder of the project, and enter `flet build windows -v`
+
+If you find any error, follow the instructions on screen. You are probably missing some dependency. When the process ends, you will find the windows folder inside build.
+
 ## Project state / future / contribution
 
 As this was a "for fun" project, I am not very invested in maintaining and adding features. However, I plan to add some features, including:
 
 - Retreive chat history on clients
 - Video chat / sharing screen
-- Improved user interface
 - Client interface for Android
 - Encryption (probably client-server and server-client)
 

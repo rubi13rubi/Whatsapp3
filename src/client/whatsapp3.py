@@ -1,11 +1,6 @@
 #___________________________________________________________
 #main functions
 #___________________________________________________________
-import os
-try: os.add_dll_directory(os.getcwd()) #add working directory to find dll
-except: pass #not windows
-import time
-import socket
 import json
 from math import ceil, sqrt
 import threading
@@ -14,10 +9,6 @@ from tkinter import ttk
 from tkinter import filedialog
 from tkinter import messagebox
 import pyaudio
-import opuslib
-from collections import deque
-import numpy as np
-import uuid
 import whatsapp3_client
 
 root = None
@@ -57,8 +48,8 @@ def send_message(message):
             message_list.insert(END, "You have left the voice chat.")
             message_list.see('end')
         else:
-            instream = audio.open(format=client_backend.FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)
-            outstream = audio.open(format=client_backend.FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, output=True, frames_per_buffer=client_backend.CHUNK)
+            instream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)
+            outstream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, output=True, frames_per_buffer=client_backend.CHUNK)
             client_backend.voice_toggle()
             threading.Thread(target=get_microphone_data, daemon=True).start()
             message_list.insert(END, "You have joined the voice chat.")
@@ -84,7 +75,7 @@ def send_message(message):
         if client_backend.voice_enabled:
             try:
                 gain_value = float(message.split(" ")[1])
-                client_backend.gain = gain_value
+                client_backend.change_gain(gain_value)
                 message_list.insert(END, "Your voice gain has been set to " + str(gain_value) + ".")
                 message_list.see('end')
             except:
@@ -474,6 +465,7 @@ def create_chat(ip, port, name, user):
     client_backend.connect(ip, port, user)
 
 client_backend = whatsapp3_client.Whatsapp3Client()
+FORMAT = pyaudio.paInt16
 audio = pyaudio.PyAudio()
 root = Tk()
 create_menu()
