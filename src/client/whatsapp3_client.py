@@ -14,13 +14,10 @@ from collections import deque
 import numpy as np
 import uuid
 import queue
+from pyrnnoise import RNNoise
 
 class Whatsapp3Client:
 
-    # audio parameters
-    CHANNELS = 1
-    RATE = 16000 # 16000 Hz (samples per second)
-    CHUNK = 320 # 320 samples per frame (640 bytes), 20 ms per frame
     # jitter buffer parameters
     JITTER_BUFFER_OPTIMAL = 4
     JITTER_BUFFER_MAX = 8
@@ -48,14 +45,12 @@ class Whatsapp3Client:
         # jitter buffer setup
         self.jitter_buffer = deque()
         self.buffer_state = self.BUFFER_WAIT_FILL
-        # audio and codec setup
-        #self.audio = pyaudio.PyAudio()
-        self.encoder = opuslib.Encoder(self.RATE, self.CHANNELS, opuslib.APPLICATION_AUDIO)
-        self.decoder = opuslib.Decoder(self.RATE, self.CHANNELS)
+        # audio setup
         self.audioqueue = queue.Queue(maxsize = 5) # Queue for the interface to put audio frames to be sent.
         self.voice_enabled = False
         self.gain = 1.0
         self.muted = False
+        self.noise_suppressor = False
         self.voice_id = uuid.uuid4().bytes # Unique ID for this client's voice data, to identify packets
 
         # Callbacks (will be set by the GUI or other interface layer)
@@ -108,6 +103,13 @@ class Whatsapp3Client:
                 threading.Thread(target=self._receive_loop, daemon=True).start()
                 if self.on_connect:
                     self.on_connect(response.get("client_list"), response.get("voice_client_list"))
+                # audio parameters and codec and denoiser initialization
+                self.CHANNELS = int(response.get("channels", 2))
+                self.RATE = int(response.get("rate", 48000))
+                self.CHUNK = int(response.get("chunk", 960))
+                self.encoder = opuslib.Encoder(self.RATE, self.CHANNELS, opuslib.APPLICATION_AUDIO)
+                self.decoder = opuslib.Decoder(self.RATE, self.CHANNELS)
+                self.denoiser = RNNoise(self.RATE)
                 return
             else:
                 if response.get("reason") == "username_taken":
@@ -279,9 +281,33 @@ class Whatsapp3Client:
                 frame = self.audioqueue.get(timeout = 1) # Get raw audio frame from interface, with timeout to allow periodic checks of the running flag
                 frame = (np.frombuffer(frame, np.int16) * self.gain).astype(np.int16).tobytes() # Apply gain
                 if  not self.muted:
+                    if self.noise_suppressor:
+                        frame = self._remove_noise(frame)
                     encoded_frame = self.encoder.encode(frame, self.CHUNK)
                     self.voice_socket.sendto(self.voice_id + encoded_frame, self.voiceaddr)
-            except Exception as e: pass #print("Error sending voice data: " + str(e))
+            except Exception as e: pass #print(traceback.format_exc())
+    
+    def _remove_noise(self, frame):
+        """
+        Applies noise suppression to the given audio frame using the RNNoise algorithm.
+        Args:
+            frame (bytes): The raw audio frame data in bytes.
+        Returns:
+            bytes: The noise-suppressed audio frame data in bytes.
+        """
+        # Convert byte data to numpy array for processing
+        audio_1d = np.frombuffer(frame, dtype=np.int16)
+        formatted_audio = audio_1d.reshape(-1, self.CHANNELS).T # Reshape to (channels, samples)
+
+        # Apply noise suppression
+        clean_frames = []
+        for speech_prob, denoised_audio in self.denoiser.denoise_chunk(formatted_audio):
+            clean_frames.append(denoised_audio)
+        clean_audio = np.concatenate(clean_frames, axis=1) # Concatenate processed frames back together
+    
+        # Revert all changes and return byte data
+        denoised_data = clean_audio.T.flatten().tobytes()
+        return denoised_data
     
     def change_gain(self, volumevalue):
         """

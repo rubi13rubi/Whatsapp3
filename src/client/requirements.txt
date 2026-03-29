@@ -2,3 +2,4 @@ numpy
 opuslib
 PyAudio
 flet
+pyrnnoise

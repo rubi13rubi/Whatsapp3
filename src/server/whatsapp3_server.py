@@ -234,7 +234,10 @@ def accept_connections():
                 "file_port": config.get("fileport"),
                 "voice_port": config.get("voiceport"),
                 "client_list": list(client_dict.values()),
-                "voice_client_list": [voice_names.get(vid) for vid in expected_voice_ids if vid in voice_names]
+                "voice_client_list": [voice_names.get(vid) for vid in expected_voice_ids if vid in voice_names],
+                "channels": CHANNELS,
+                "rate": RATE,
+                "chunk": FRAME_SIZE
             }
             client.send((json.dumps(response_dict) + "\n").encode('utf-8'))
             if response_status == "ok":
@@ -606,9 +609,9 @@ voice_names = {} # Map voice client identifiers to their corresponding usernames
 jitter_buffers = {}
 buffer_states = {}
 jitter_lock = threading.Lock()
-CHANNELS = 1 # mono
-RATE = 16000  # 16 kHz (samples per second)
-FRAME_SIZE = 320 # 320 samples per frame (640 bytes), 20 ms per frame
+CHANNELS = 2 # stereo audio
+RATE = 48000  # 48 kHz (samples per second)
+FRAME_SIZE = 960 # 960 samples per frame (1920 bytes), 20 ms per frame
 MIX_INTERVAL = FRAME_SIZE / RATE # seconds per frame
 JITTER_BUFFER_OPTIMAL = 4 # Optimal buffer size in frames
 JITTER_BUFFER_MAX = 8 # Maximum buffer size in frames

@@ -75,7 +75,7 @@ If everything worked, you should see another interface with box where all messag
 - To **send a message**, type it in the chat box and click "send" (or press enter)
 - To **send a file**, click "send file", select a file and click "send". The transfer progress will be shown in a progress bar. Do not disconnect from the server until your file has been sent. Otherwise, your transfer will be cancelled.
 - To **download a file** sent by another user, double click the message of the file. You will be prompted with a window asking where would you like to save the file and the name of it. Once you select it you will start downloading the file and show the download progress in a progress bar on a separate window. Do not try to open the file or disconnect from the server until the file has downloaded completely.
-- To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own gain. To mute or unmute your microphone, type "/mute". To leave the voice chat, type "/voice" again.
+- To use **voice chat**, type "/voice" on the chat and send. Other clients in the server will be notified when you join the voice chat. If your voice volume is too high or too low, type "/gain (gain value)" with the value you want. Default is 1 so typing "/gain 2" will duplicate the volume of your input. You cannot configure gain value for other users, so if you hear them very low or very high, ask them to change their own gain. To mute or unmute your microphone, type "/mute". To enable/disable the noise suppression, type /noise_suppression. To leave the voice chat, type "/voice" again.
 
 ## New client setup and usage
 
@@ -93,7 +93,7 @@ If everything worked, you should see a bigger window, with 3 different parts: Th
 - To **send a message**, type it in the chat box and click the send button (or press enter).
 - To **send a file**, click the clip button on the side of the send button. You will be prompted with a file selector, and after selecting the file you will see a progress bar on the chat box. Do not disconnect until the transfer is complete or it will be cancelled.
 - To **download a file** sent by another user, click the download button on the message. You will be prompted with a selector where you can decide the name and location of the file, after which the download will begin. Do not try to open the file or disconnect from the server until the file has downloaded completely.
-- To use **voice chat**, click the "Connect to voice chat" button. You will see that your user gets added to voice chat, and 3 buttons appear. The first one will disconnect you from the voice chat, the second one will allow you to mute/unmute yourself, and the last one will open a menu where you can configure the input/output devices and your gain (input volume).
+- To use **voice chat**, click the "Connect to voice chat" button. You will see that your user gets added to voice chat, and 3 buttons appear. The first one will disconnect you from the voice chat, the second one will allow you to mute/unmute yourself, and the last one will open a menu where you can configure the input/output devices, your gain (input volume) and the noise suppressor.
 
 ## Opus error
 
@@ -139,7 +139,7 @@ python3 music_bot.py
 ```
 Insert the server ip and port and enjoy. Use `!help` command to see all available commands.
 
-> **_NOTE:_**  You will notice the bot takes too long to start playing the song. This will only happen the first time for each video as extracting the url is a long process. The bot saves a local cache to avoid requesting the url for already played videos, and updates it if the catched url no longer works. Also the music quality is low due to the audio codec being designed for human voice and not for music.
+> **_NOTE:_**  You will notice the bot takes too long to start playing the song. This will only happen the first time for each video as extracting the url is a long process. The bot saves a local cache to avoid requesting the url for already played videos, and updates it if the catched url no longer works.
 
 ## About virus/malware detection. Compile the source yourself
 
@@ -153,7 +153,7 @@ The steps shown below apply for Windows, but they should work (although it has n
 4. **Open a terminal** on the client folder you downloaded.
 5. Install pyinstaller package and **run the following command**
 ```
-pyinstaller --onefile --noconsole whatsapp3.py
+pyinstaller --onefile --noconsole --collect-binaries pyrnnoise --collect-data audiolab whatsapp3.py
 ```
 The command will automatically include the opus .dll files on the executable so it can work as a single file. If the opus binaries are not in the same folder when compiling, you will have an error when executing the .exe. When the proccess ends,a bunch of folders and files will have been created. You can find the .exe on the dist folder.
 
@@ -166,7 +166,8 @@ Compiling with flet is harder, as it involves dealing with flutter and many depe
 ```
 "numpy",
 "opuslib",
-"PyAudio"
+"PyAudio",
+"pyrnnoise"
 ```
 3. On src, copy the following files/folders from the repository:
 ```
@@ -177,9 +178,9 @@ libwinpthread-1.dll
 opus.dll
 assets
 ```
-4. Open a terminal as administrator on the root folder of the project, and enter `flet build windows -v`
+4. Open a terminal **as administrator** on the root folder of the project, and enter `flet build windows -v`
 
-If you find any error, follow the instructions on screen. You are probably missing some dependency. When the process ends, you will find the windows folder inside build.
+If you find any error, follow the instructions on screen. You are probably missing some dependency, like Visual Studio. When the process ends, you will find the windows folder inside build.
 
 ## Project state / future / contribution
 

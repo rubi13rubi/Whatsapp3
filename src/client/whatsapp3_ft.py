@@ -132,6 +132,7 @@ class MessageContainer(ft.Container):
             expand=True,
             auto_scroll=True,
         )
+        self.url_launcher = ft.UrlLauncher() # UrlLauncher instance to handle link taps in messages
 
     async def update_interface(self):
         """Helper method to update the interface asynchronously."""
@@ -139,10 +140,18 @@ class MessageContainer(ft.Container):
     
     def add_message(self, sender, content, page):
         """Adds a message to the message list."""
+        async def on_link_tap(e):
+            """Handles link taps in messages and opens them in the default web browser."""
+            url = e.data
+            await self.url_launcher.launch_url(url) # Use UrlLauncher to open the link in the default web browser
         message_control = ft.Container(
             content=ft.Column([
                 ft.Text(sender, size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SECONDARY_CONTAINER),
-                ft.Text(content, size=14, color=ft.Colors.ON_SECONDARY_CONTAINER)
+                ft.Markdown(content,
+                            selectable=True,
+                            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                            on_tap_link=on_link_tap
+                            )
             ], spacing=5),
             bgcolor=ft.Colors.SECONDARY_CONTAINER,
             border_radius=5,
@@ -380,6 +389,12 @@ def save_data(page):
         json.dump(config, f)
     page.run_task(page.window.destroy) # Close the application window after saving data and disconnecting
 
+def recode_name(name):
+    """Recodes the string for display purposes."""
+    try:
+        return name.encode('cp1252').decode('utf-8')
+    except:
+        return name
 
 def main(page: ft.Page):
     """
@@ -503,6 +518,7 @@ def main(page: ft.Page):
             options=[], on_text_change=lambda e: change_output_device(e)
         )
         gain_slider = ft.Slider(min=0.0, max=2.0, value=config.get("gain", 1.0), on_change_end=lambda e: on_gain_change(e))
+        noise_suppression_checkbox = ft.Checkbox(label="Enable noise suppression", value=config.get("noise_suppressor", False), on_change=lambda e: on_noise_suppressor_toggle(e))
         warning_message = ft.Text("", color=ft.Colors.ERROR, size=12)
         page.dialog = ft.AlertDialog(
                 title=ft.Text("Voice Chat Settings"),
@@ -513,6 +529,7 @@ def main(page: ft.Page):
                     output_device_dropdown,
                     ft.Text("Gain:"),
                     gain_slider,
+                    noise_suppression_checkbox,
                     warning_message
                 ]),
                 actions=[ft.Button("OK", on_click=lambda e: setattr(page.dialog, "open", False))]
@@ -572,12 +589,28 @@ def main(page: ft.Page):
             client_backend.disconnect() # Disconnect from the server using the backend client
             navigate_to_server_list() # Navigate back to the server list screen
         
-        def recode_name(name):
-            """Recodes the string for display purposes."""
-            try:
-                return name.encode('cp1252').decode('utf-8')
-            except:
-                return name
+        def get_audio_devices():
+            """Gets the list of available audio input and output devices and updates the dropdown options."""
+            input_devices = []
+            output_devices = []
+            selected_input = config.get("input_device", None)
+            selected_output = config.get("output_device", None)
+            default_host_api = audio.get_default_host_api_info()["index"]
+            for i in range(audio.get_device_count()):
+                device_info = audio.get_device_info_by_index(i)
+                if device_info["hostApi"] != default_host_api: # Filter devices to only include those from the default host API
+                    continue
+                if device_info["maxInputChannels"] > 0: # If the device has input channels, add it to the input devices list
+                    input_devices.append((recode_name(device_info["name"]), i))
+                    if selected_input == recode_name(device_info["name"]):
+                        input_device_dropdown.value = str(i) # Set the dropdown value to the selected input device
+                if device_info["maxOutputChannels"] > 0: # If the device has output channels, add it to the output devices list
+                    output_devices.append((recode_name(device_info["name"]), i))
+                    if selected_output == recode_name(device_info["name"]):
+                        output_device_dropdown.value = str(i) # Set the dropdown value to the selected output device
+            input_device_dropdown.options = [ft.dropdown.Option(key=str(i), text=recode_name(name)) for name, i in input_devices]
+            output_device_dropdown.options = [ft.dropdown.Option(key=str(i), text=recode_name(name)) for name, i in output_devices]
+            page.update()
             
         def start_voice_chat(e):
             """Starts the voice chat and updates the interface accordingly."""
@@ -610,6 +643,9 @@ def main(page: ft.Page):
             page.update() # Update the page to reflect the changes
             voice_user_list.append(config.get("name", "Guest")) # Add the user to the voice user list
             voice_user_list_container.update_user_list(voice_user_list, page) # Update the voice user list display
+            get_audio_devices()
+            warning_message.value = ""
+            gain_slider.value = config.get("gain", 1.0)
             threading.Thread(target=get_microphone_data, daemon=True).start() # Start a thread to get microphone data and send it to the server
 
         def stop_voice_chat(e):
@@ -633,29 +669,6 @@ def main(page: ft.Page):
                 mute_button.icon = ft.Icons.MIC_OFF
                 mute_button.icon_color = ft.Colors.ERROR
                 mute_button.update()
-        
-        def get_audio_devices():
-            """Gets the list of available audio input and output devices and updates the dropdown options."""
-            input_devices = []
-            output_devices = []
-            selected_input = config.get("input_device", None)
-            selected_output = config.get("output_device", None)
-            default_host_api = audio.get_default_host_api_info()["index"]
-            for i in range(audio.get_device_count()):
-                device_info = audio.get_device_info_by_index(i)
-                if device_info["hostApi"] != default_host_api: # Filter devices to only include those from the default host API
-                    continue
-                if device_info["maxInputChannels"] > 0: # If the device has input channels, add it to the input devices list
-                    input_devices.append((recode_name(device_info["name"]), i))
-                    if selected_input == recode_name(device_info["name"]):
-                        input_device_dropdown.value = str(i) # Set the dropdown value to the selected input device
-                if device_info["maxOutputChannels"] > 0: # If the device has output channels, add it to the output devices list
-                    output_devices.append((recode_name(device_info["name"]), i))
-                    if selected_output == recode_name(device_info["name"]):
-                        output_device_dropdown.value = str(i) # Set the dropdown value to the selected output device
-            input_device_dropdown.options = [ft.dropdown.Option(key=str(i), text=recode_name(name)) for name, i in input_devices]
-            output_device_dropdown.options = [ft.dropdown.Option(key=str(i), text=recode_name(name)) for name, i in output_devices]
-            page.update()
         
         def change_input_device(e):
             """Changes the audio input device based on the dropdown selection."""
@@ -682,12 +695,15 @@ def main(page: ft.Page):
             new_gain = gain_slider.value
             config["gain"] = new_gain # Update the config with the new gain value
             client_backend.gain = new_gain # Set the new gain value in the backend client
+        
+        def on_noise_suppressor_toggle(e):
+            """Toggles the noise suppressor for the voice chat based on the checkbox value."""
+            enabled = noise_suppression_checkbox.value
+            config["noise_suppressor"] = enabled # Update the config with the new noise suppressor state
+            client_backend.noise_suppressor = enabled # Set the new noise suppressor state in the backend client
 
         def show_voice_chat_settings(e):
             """Shows the voice chat settings dialog."""
-            get_audio_devices()
-            warning_message.value = ""
-            gain_slider.value = config.get("gain", 1.0)
             page.dialog.open = True
             page.update()
 
@@ -856,11 +872,12 @@ except: config = {
     "name": "Guest",
     "gain": 1.0,
     "input_device": None,
-    "output_device": None
+    "output_device": None,
+    "noise_suppressor": False
 }
 if config.get("input_device") == None or config.get("output_device") == None:
     # If there are no saved audio devices in the config, set the default devices
-    config["input_device"] = audio.get_default_input_device_info().get("name")
-    config["output_device"] = audio.get_default_output_device_info().get("name")
+    config["input_device"] = recode_name(audio.get_default_input_device_info().get("name"))
+    config["output_device"] = recode_name(audio.get_default_output_device_info().get("name"))
 client_backend = whatsapp3_client.Whatsapp3Client()
 ft.run(main) # Run the Flet app with the main function as the entry point

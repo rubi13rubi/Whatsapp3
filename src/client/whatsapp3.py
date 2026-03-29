@@ -86,6 +86,20 @@ def send_message(message):
             message_list.see('end')
         return
 
+    if message == "/noise_suppression":
+        if client_backend.voice_enabled:
+            client_backend.noise_suppressor = not client_backend.noise_suppressor
+            if client_backend.noise_suppressor:
+                message_list.insert(END, "Noise suppression enabled.")
+                message_list.see('end')
+            else:
+                message_list.insert(END, "Noise suppression disabled.")
+                message_list.see('end')
+        else:
+            message_list.insert(END, "You are not in the voice chat.")
+            message_list.see('end')
+        return
+
     message_list.insert(END, "YOU: " + message)
     message_list.see('end')
     client_backend.send_chat_message(message)

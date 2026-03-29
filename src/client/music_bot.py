@@ -232,9 +232,9 @@ client_backend.on_chat_message = on_message
 IP = input("Enter the IP address of the server: ")
 PORT = int(input("Enter the port number of the server: "))
 USERNAME = "MusicBot"
-SEND_INTERVAL = client_backend.CHUNK / client_backend.RATE # Time interval between sending audio frames, based on the chunk size and sample rate
 print("Connecting to chat...")
 client_backend.connect(IP, PORT, USERNAME)
+SEND_INTERVAL = client_backend.CHUNK / client_backend.RATE # Time interval between sending audio frames, based on the chunk size and sample rate
 print("Music bot is ready and running. Waiting for commands...")
 input("Press Enter to exit...\n") # Keep the program running until user decides to exit
 print("Saving url cache...")
