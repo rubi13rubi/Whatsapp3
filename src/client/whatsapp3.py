@@ -10,12 +10,14 @@ from tkinter import filedialog
 from tkinter import messagebox
 import pyaudio
 import whatsapp3_client
+import numpy as np
 
 root = None
 message_list = None
 message_entry = None
 server_list = []
 server_listbox = None
+duplicate_input = False
 
 # ____________________________________________________________
 # Receive and send functions, called by the GUI elements and the client backend callbacks
@@ -36,6 +38,7 @@ def send_message(message):
     global instream
     global outstream
     global client_backend
+    global duplicate_input
 
     message_entry.delete(0, 'end')
 
@@ -48,7 +51,14 @@ def send_message(message):
             message_list.insert(END, "You have left the voice chat.")
             message_list.see('end')
         else:
-            instream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)
+            try:
+                instream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)      
+                duplicate_input = False
+            except:
+                if client_backend.CHANNELS == 2:
+                    # If stereo input is not available, try mono input and enable flag to duplicate the input when captured.
+                    duplicate_input = True
+                    instream = audio.open(format=FORMAT, channels=1, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK)
             outstream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, output=True, frames_per_buffer=client_backend.CHUNK)
             client_backend.voice_toggle()
             threading.Thread(target=get_microphone_data, daemon=True).start()
@@ -112,10 +122,13 @@ def get_microphone_data():
     global instream
     global outstream
     global audio
+    global duplicate_input
 
     while client_backend.voice_enabled and client_backend.running:
         try:
             frame = instream.read(client_backend.CHUNK, exception_on_overflow=False)
+            if duplicate_input:
+                frame = frame = np.frombuffer(frame, dtype=np.int16).repeat(2).tobytes()
             client_backend.audioqueue.put(frame)
         except Exception as e: pass #print("Error reading microphone data: " + str(e))
     instream.stop_stream()

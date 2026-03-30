@@ -5,6 +5,7 @@ import pyaudio
 import threading
 import os
 import sys
+import numpy as np
 
 class ServerCard(ft.Container):
     """
@@ -350,6 +351,8 @@ def get_microphone_data():
     while client_backend.voice_enabled and client_backend.running:
         try:
             frame = instream.read(client_backend.CHUNK, exception_on_overflow=False)
+            if duplicate_input:
+                frame = np.frombuffer(frame, dtype=np.int16).repeat(2).tobytes()
             client_backend.audioqueue.put(frame)
         except Exception as e: pass #print("Error reading microphone data: " + str(e))
     instream.stop_stream()
@@ -617,6 +620,7 @@ def main(page: ft.Page):
             nonlocal voice_chat_row
             global instream
             global outstream
+            global duplicate_input
 
             # Audio index selection logic
             input_device_index = None
@@ -634,8 +638,14 @@ def main(page: ft.Page):
                         output_device_index = i
                     elif output_device_index is None: # Fallback in case there is no other match
                         output_device_index = i
-
-            instream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK, input_device_index=input_device_index) # Open the audio input stream with the selected input device
+            try:
+                instream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK, input_device_index=input_device_index) # Open the audio input stream with the selected input device
+                duplicate_input = False
+            except:
+                if client_backend.CHANNELS == 2:
+                    # If stereo input is not available, try mono input and enable flag to duplicate the input when captured.
+                    duplicate_input = True
+                    instream = audio.open(format=FORMAT, channels=1, rate=client_backend.RATE, input=True, frames_per_buffer=client_backend.CHUNK, input_device_index=input_device_index) # Open the audio input stream with mono channels
             outstream = audio.open(format=FORMAT, channels=client_backend.CHANNELS, rate=client_backend.RATE, output=True, frames_per_buffer=client_backend.CHUNK, output_device_index=output_device_index)
             client_backend.gain = config.get("gain", 1.0) # Set the gain for the voice chat from the config
             client_backend.voice_toggle() # Toggle the voice chat using the backend client
@@ -880,4 +890,5 @@ if config.get("input_device") == None or config.get("output_device") == None:
     config["input_device"] = recode_name(audio.get_default_input_device_info().get("name"))
     config["output_device"] = recode_name(audio.get_default_output_device_info().get("name"))
 client_backend = whatsapp3_client.Whatsapp3Client()
+duplicate_input = False
 ft.run(main) # Run the Flet app with the main function as the entry point

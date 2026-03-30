@@ -301,7 +301,6 @@ def receive_message_loop(client, username, addr):
                         }
                         log(sender + ": " + content)
                     elif msg_type == "voice_connect":
-                        print(message)
                         voice_id = message.get("voice_id")
                         if voice_id and voice_id not in expected_voice_ids:
                             expected_voice_ids.append(voice_id)
