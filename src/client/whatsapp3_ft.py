@@ -64,17 +64,21 @@ class EditableNameField(ft.Container):
         self.name_text = ft.Text(
             initial_name, 
             size=16, 
-            color=ft.Colors.ON_PRIMARY,
+            color=ft.Colors.ON_SURFACE,
+            overflow=ft.TextOverflow.ELLIPSIS,
+            max_lines=1,
+            expand=True
+
         )
         self.name_input = ft.TextField(
             value=initial_name,
             on_submit=self.save_name,
             expand=True,
             border = ft.InputBorder.UNDERLINE,
-            cursor_color=ft.Colors.ON_PRIMARY,
-            border_color=ft.Colors.ON_PRIMARY,
-            color=ft.Colors.ON_PRIMARY,
-            selection_color=ft.Colors.ON_PRIMARY,
+            cursor_color=ft.Colors.ON_SURFACE,
+            border_color=ft.Colors.ON_SURFACE,
+            color=ft.Colors.ON_SURFACE,
+            selection_color=ft.Colors.ON_SURFACE,
             text_size=16,
             dense=True,
             autofocus=True
@@ -84,12 +88,12 @@ class EditableNameField(ft.Container):
                 ft.Text(
                     f"Welcome back, ", 
                     size=16, 
-                    color=ft.Colors.ON_PRIMARY
+                    color=ft.Colors.ON_SURFACE,
                 ),
                 self.name_text,
                 ft.IconButton(
                     ft.Icons.EDIT,
-                    icon_color=ft.Colors.ON_PRIMARY,
+                    icon_color=ft.Colors.ON_SURFACE,
                     on_click=self.toggle_edit_mode
                 )
             ],
@@ -285,10 +289,10 @@ class MessageContainer(ft.Container):
         file_picker = ft.FilePicker()
         async def pick_file():
             path = await file_picker.pick_files(dialog_title="Select file to upload")
-            if path[0].path:
+            try:
                 threading.Thread(target=upload_file, args=(path[0].path,), daemon=True).start() # Start a thread to upload the file to the server
                 file_upload_control.content.controls[0].value = f"Uploading file: {os.path.basename(path[0].path)}"
-            else:
+            except:
                 self.content.controls.remove(file_upload_control) # Remove the file upload notice if no file was selected
                 page.run_task(self.update_interface)
         
@@ -392,6 +396,7 @@ def save_data(page):
         json.dump(config, f)
     page.run_task(page.window.destroy) # Close the application window after saving data and disconnecting
 
+
 def recode_name(name):
     """Recodes the string for display purposes."""
     try:
@@ -408,9 +413,23 @@ def main(page: ft.Page):
     """
     global server_list
     global config
+
+    def window_minimize(e):
+        page.window.minimized = True
+        page.update()
+
+    def window_maximize(e):
+        page.window.maximized = not page.window.maximized
+        page.update()
+
+    def window_close(e):
+        save_data(page)
+
     page.theme = ft.Theme(color_scheme_seed=config.get("color_seed")) # Set the theme
     page.window.prevent_close = True # Prevent the window from closing immediately to allow saving data
     page.window.on_event = lambda e: save_data(page) if e.type.name == "CLOSE" else None # Save data when the app is closed
+    page.window.title_bar_hidden = True
+    page.padding = 0
     
     def navigate_to_server_list(e = None, reason = None, exception = None):
         """
@@ -421,14 +440,35 @@ def main(page: ft.Page):
             exception: The exception that caused the error (optional).
         """
         page.controls.clear() # Clear the current screen
-        page.title = "Whatsapp 3"
         page.window.width = 400
         page.window.height = 600
-        page.bgcolor = ft.Colors.PRIMARY
         page.window.icon = os.path.join(get_base_path(), "assets", "icon_transparent.ico")
-        # Get the server list from the json file
-        
-        page.add(server_list_screen(server_list)) # Add the server list screen to the page
+        # Custom app bar with minimize, maximize, and close buttons
+        app_bar = ft.Container(
+            bgcolor= ft.Colors.PRIMARY,
+            content= ft.WindowDragArea( # Draggable area for moving the window
+                content=ft.Row([
+                    # Title
+                    ft.Text("Whatsapp 3", size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, expand=True, text_align=ft.TextAlign.LEFT),
+                    # Window control buttons
+                    ft.Row(
+                        spacing=0,
+                        controls=[
+                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_minimize),
+                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_maximize),
+                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ERROR, icon_size=18, on_click=window_close),
+                        ]
+                    )
+                ],
+                expand=True,
+                )
+            ),
+            padding=10,
+        )
+
+        page.add(app_bar) # Add the custom app bar to the page
+        page.add(ft.Container(server_list_screen(server_list), padding=10, expand=True)) # Add the server list screen to the page
+
         if reason or exception: # Show an error message if there is a reason or exception for disconnection
             error_message = "Disconnected from server."
             if reason == "no_response":
@@ -483,7 +523,6 @@ def main(page: ft.Page):
         page.title = "Whatsapp 3 - " + server_name
         page.window.width = 800
         page.window.height = 600
-        page.bgcolor = ft.Colors.PRIMARY
         # Add chat screen controls here (placeholder for now)
         message_container = MessageContainer()
         user_list_container = UserListContainer()
@@ -717,9 +756,13 @@ def main(page: ft.Page):
             page.dialog.open = True
             page.update()
 
-        page.add(ft.Row([
-            ft.Column([
-                ft.Row([ # Top row with server name and disconnect button
+        
+        # Custom app bar with minimize, maximize, and close buttons
+        app_bar = ft.Container(
+            bgcolor= ft.Colors.PRIMARY,
+            content= ft.WindowDragArea( # Draggable area for moving the window
+                content=ft.Row([
+                    # Disconnect button
                     ft.Button(
                         "Disconnect",
                         on_click=disconnect,
@@ -727,8 +770,26 @@ def main(page: ft.Page):
                         bgcolor=ft.Colors.INVERSE_PRIMARY,
                         color=ft.Colors.ON_PRIMARY_CONTAINER,
                     ),
-                    ft.Text(f"Chat: {server_name}", size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, expand=True, text_align=ft.TextAlign.CENTER)
-                ], height=50),
+                    # Title
+                    ft.Text(f"Whatsapp 3 - Connected to {server_name}" , size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, expand=True, text_align=ft.TextAlign.CENTER),
+                    # Window control buttons
+                    ft.Row(
+                        spacing=0,
+                        controls=[
+                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_minimize),
+                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_maximize),
+                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ERROR, icon_size=18, on_click=window_close),
+                        ]
+                    )
+                ],
+                expand=True,
+                )
+            ),
+            padding=10,
+        )
+        
+        chat_screen = ft.Row([
+            ft.Column([
                 message_container, # The container that displays the messages
                 ft.Row([ # Message input row
                     message_textfield,
@@ -747,13 +808,17 @@ def main(page: ft.Page):
                 ], height=50)
             ], expand=True),
             ft.Column([ # Side column
-                ft.Text("Connected Users", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, text_align=ft.TextAlign.CENTER),
+                ft.Text("Connected Users", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE, text_align=ft.TextAlign.CENTER),
                 user_list_container, # The container that displays the list of connected users
-                ft.Text("Voice Chat Users", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, text_align=ft.TextAlign.CENTER),
+                ft.Text("Voice Chat Users", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_SURFACE, text_align=ft.TextAlign.CENTER),
                 voice_user_list_container, # The container that displays the list of connected users in voice chat
                 voice_chat_row # The row that contains the voice chat controls (connect/disconnect, mute, settings)
             ], width=250)
-        ], expand = True)) # Add the chat screen controls to the page
+        ], expand=True)
+
+        page.add(app_bar)
+        page.add(ft.Container(chat_screen, padding=10, expand=True)) # Add the chat screen to the page
+
         client_backend.on_chat_message = lambda sender, content: message_container.add_message(sender, content, page) # Set the callback for receiving chat messages
         client_backend.on_disconnect = lambda reason, exception: navigate_to_server_list(reason=reason, exception=exception) # Set the callback for disconnection
         client_backend.on_new_client = on_new_client # Set the callback for new client connections
@@ -805,9 +870,8 @@ def main(page: ft.Page):
         return ft.Column(expand=True, controls=[
             ft.Row([
                 ft.Column(expand=True, controls=[
-                    ft.Text("Whatsapp 3", size=24, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY),
                     EditableNameField(initial_name=config.get("name", "Guest"), on_name_changed=on_name_changed),
-                    ft.Text("Select a server to connect to:", size=16, color=ft.Colors.ON_PRIMARY),
+                    ft.Text("Select a server to connect to:", size=16, color=ft.Colors.ON_SURFACE),
                 ]),
                 ft.Image(src="assets/logo.png", width=80, height=80)
             ], height=100, margin=10),
