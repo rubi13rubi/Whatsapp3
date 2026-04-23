@@ -6,6 +6,7 @@ import threading
 import os
 import sys
 import numpy as np
+import asyncio
 
 class ServerCard(ft.Container):
     """
@@ -73,12 +74,13 @@ class EditableNameField(ft.Container):
         self.name_input = ft.TextField(
             value=initial_name,
             on_submit=self.save_name,
+            on_tap_outside=self.save_name,
             expand=True,
             border = ft.InputBorder.UNDERLINE,
             cursor_color=ft.Colors.ON_SURFACE,
             border_color=ft.Colors.ON_SURFACE,
             color=ft.Colors.ON_SURFACE,
-            selection_color=ft.Colors.ON_SURFACE,
+            selection_color=ft.Colors.ON_INVERSE_SURFACE,
             text_size=16,
             dense=True,
             autofocus=True
@@ -351,6 +353,7 @@ def get_microphone_data():
     global instream
     global outstream
     global audio
+    global duplicate_input
 
     while client_backend.voice_enabled and client_backend.running:
         try:
@@ -385,16 +388,18 @@ def get_base_path():
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
-def save_data(page):
+async def save_and_exit(page):
     """
-    Saves the server list and config to json files in the base path of the application.
+    Saves the server list and config to json files
+    and exits the application.
     """
     global server_list, server_list_path, config, config_path
     with open(server_list_path, "w") as f:
         json.dump(server_list, f)
     with open(config_path, "w") as f:
         json.dump(config, f)
-    page.run_task(page.window.destroy) # Close the application window after saving data and disconnecting
+    await asyncio.sleep(0.3) # To allow the loading dialog to be displayed before closing the window
+    await page.window.destroy() # Close the application window after saving data
 
 
 def recode_name(name):
@@ -414,6 +419,35 @@ def main(page: ft.Page):
     global server_list
     global config
 
+    def show_loading_dialog(e = None, message = "Loading..."):
+        """
+        Shows a loading dialog with a message when called.
+        Args:
+            e: The event that triggered the dialog (optional).
+            message: The message to display in the loading dialog (optional, default is "Loading...").
+        """
+        page.dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(message),
+            content=ft.ProgressBar(width=200, bgcolor=ft.Colors.INVERSE_PRIMARY, color=ft.Colors.ON_PRIMARY_CONTAINER),
+        )
+        page.overlay.append(page.dialog)
+        page.dialog.open = True
+        page.update()
+    
+    def close_loading_dialog(e = None):
+        """
+        Closes the loading dialog when called.
+        Args:
+            e: The event that triggered the dialog close (optional).
+        """
+        try:
+            if page.dialog and page.dialog.open:
+                    page.dialog.open = False
+                    page.update()
+        except Exception as e:
+            pass
+
     def window_minimize(e):
         page.window.minimized = True
         page.update()
@@ -423,11 +457,13 @@ def main(page: ft.Page):
         page.update()
 
     def window_close(e):
-        save_data(page)
+        show_loading_dialog(message="Saving data and exiting...")
+        page.run_task(save_and_exit, page) # Save data and exit the application when the window is closed
+
 
     page.theme = ft.Theme(color_scheme_seed=config.get("color_seed")) # Set the theme
     page.window.prevent_close = True # Prevent the window from closing immediately to allow saving data
-    page.window.on_event = lambda e: save_data(page) if e.type.name == "CLOSE" else None # Save data when the app is closed
+    page.window.on_event = lambda e: window_close(e) if e.type == ft.WindowEventType.CLOSE else None # Save data when the app is closed
     page.window.title_bar_hidden = True
     page.padding = 0
     
@@ -440,6 +476,7 @@ def main(page: ft.Page):
             exception: The exception that caused the error (optional).
         """
         page.controls.clear() # Clear the current screen
+        close_loading_dialog() # Close any loading dialog that might be open
         page.window.width = 400
         page.window.height = 600
         page.window.icon = os.path.join(get_base_path(), "assets", "icon_transparent.ico")
@@ -454,9 +491,9 @@ def main(page: ft.Page):
                     ft.Row(
                         spacing=0,
                         controls=[
-                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_minimize),
-                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_maximize),
-                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ERROR, icon_size=18, on_click=window_close),
+                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_minimize),
+                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_maximize),
+                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_close),
                         ]
                     )
                 ],
@@ -497,6 +534,7 @@ def main(page: ft.Page):
             page.dialog.open = True
         async def update_interface():
             page.update() # Update the page to reflect the changes
+        
         page.run_task(update_interface)
     
     def show_add_server_dialog(e):
@@ -585,6 +623,7 @@ def main(page: ft.Page):
             user_list_container.update_user_list(user_list, page) # Update the user list display with the connected users
             voice_user_list = voice_client_list # Set the voice user list to the connected voice clients
             voice_user_list_container.update_user_list(voice_user_list, page) # Update the voice user list display
+            close_loading_dialog() # Close the loading dialog after successful connection
 
         def on_new_client(new_username):
             """Callback for when a new client connects to the server."""
@@ -767,7 +806,7 @@ def main(page: ft.Page):
                         "Disconnect",
                         on_click=disconnect,
                         icon=ft.Icons.LINK_OFF,
-                        bgcolor=ft.Colors.INVERSE_PRIMARY,
+                        bgcolor=ft.Colors.PRIMARY_CONTAINER,
                         color=ft.Colors.ON_PRIMARY_CONTAINER,
                     ),
                     # Title
@@ -776,9 +815,9 @@ def main(page: ft.Page):
                     ft.Row(
                         spacing=0,
                         controls=[
-                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_minimize),
-                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, icon_size=18, on_click=window_maximize),
-                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ERROR, icon_size=18, on_click=window_close),
+                            ft.IconButton(ft.Icons.MINIMIZE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_minimize),
+                            ft.IconButton(ft.Icons.CROP_SQUARE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_maximize),
+                            ft.IconButton(ft.Icons.CLOSE, icon_color=ft.Colors.ON_PRIMARY, hover_color=ft.Colors.PRIMARY_CONTAINER, icon_size=18, on_click=window_close),
                         ]
                     )
                 ],
@@ -829,8 +868,8 @@ def main(page: ft.Page):
         client_backend.on_audio_frame = play_audio_frame # Set the callback for receiving audio frames
         client_backend.on_file_notice = lambda sender, filename: message_container.add_file_notice(sender, filename, page) # Set the callback for receiving file notices
         page.update()
-        client_backend.connect(server_ip, server_port, config.get("name", "Guest")) # Connect to the server using the backend client
-        
+        show_loading_dialog(message="Connecting to server...")
+        threading.Thread(target=client_backend.connect, args=(server_ip, server_port, config.get("name", "Guest")), daemon=True).start()
 
     def delete_server(server_number):
         """
@@ -931,6 +970,8 @@ def main(page: ft.Page):
         )
     # Start the app on the server list screen
     navigate_to_server_list()
+    page.window.visible = True # Make the window visible after setting up the interface
+    page.update() # Update the page to reflect the initial screen
 
 # Pyaudio setup for voice chat
 FORMAT = pyaudio.paInt16
@@ -955,4 +996,4 @@ if config.get("input_device") == None or config.get("output_device") == None:
     config["output_device"] = recode_name(audio.get_default_output_device_info().get("name"))
 client_backend = whatsapp3_client.Whatsapp3Client()
 duplicate_input = False
-ft.run(main) # Run the Flet app with the main function as the entry point
+ft.run(main, view=ft.AppView.FLET_APP_HIDDEN) # Run the Flet app with the main function as the entry point
