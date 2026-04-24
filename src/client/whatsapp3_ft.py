@@ -600,7 +600,16 @@ def main(page: ft.Page):
         gain_slider = ft.Slider(min=0.0, max=2.0, value=config.get("gain", 1.0), on_change_end=lambda e: on_gain_change(e))
         noise_suppression_checkbox = ft.Checkbox(label="Enable noise suppression", value=config.get("noise_suppressor", False), on_change=lambda e: on_noise_suppressor_toggle(e))
         warning_message = ft.Text("", color=ft.Colors.ERROR, size=12)
-        page.dialog = ft.AlertDialog(
+
+        def on_connect(client_list, voice_client_list):
+            """Callback for when the client successfully connects to the server."""
+            nonlocal user_list, voice_user_list
+            user_list.extend(client_list) # Add the connected clients to the user list
+            user_list_container.update_user_list(user_list, page) # Update the user list display with the connected users
+            voice_user_list = voice_client_list # Set the voice user list to the connected voice clients
+            voice_user_list_container.update_user_list(voice_user_list, page) # Update the voice user list display
+            close_loading_dialog() # Close the loading dialog after successful connection
+            page.dialog = ft.AlertDialog(
                 title=ft.Text("Voice Chat Settings"),
                 content=ft.Column([
                     ft.Text("Input device:"),
@@ -614,16 +623,7 @@ def main(page: ft.Page):
                 ]),
                 actions=[ft.Button("OK", on_click=lambda e: setattr(page.dialog, "open", False))]
             )
-        page.overlay.append(page.dialog)
-
-        def on_connect(client_list, voice_client_list):
-            """Callback for when the client successfully connects to the server."""
-            nonlocal user_list, voice_user_list
-            user_list.extend(client_list) # Add the connected clients to the user list
-            user_list_container.update_user_list(user_list, page) # Update the user list display with the connected users
-            voice_user_list = voice_client_list # Set the voice user list to the connected voice clients
-            voice_user_list_container.update_user_list(voice_user_list, page) # Update the voice user list display
-            close_loading_dialog() # Close the loading dialog after successful connection
+            page.overlay.append(page.dialog)
 
         def on_new_client(new_username):
             """Callback for when a new client connects to the server."""
@@ -972,6 +972,8 @@ def main(page: ft.Page):
     navigate_to_server_list()
     page.window.visible = True # Make the window visible after setting up the interface
     page.update() # Update the page to reflect the initial screen
+    
+    
 
 # Pyaudio setup for voice chat
 FORMAT = pyaudio.paInt16
@@ -996,4 +998,4 @@ if config.get("input_device") == None or config.get("output_device") == None:
     config["output_device"] = recode_name(audio.get_default_output_device_info().get("name"))
 client_backend = whatsapp3_client.Whatsapp3Client()
 duplicate_input = False
-ft.run(main, view=ft.AppView.FLET_APP_HIDDEN) # Run the Flet app with the main function as the entry point
+ft.run(main) # Run the Flet app with the main function as the entry point
