@@ -12,7 +12,7 @@ class ServerCard(ft.Container):
     """
     A custom Flet container to display server information and a connect button.
     """
-    def __init__(self, server_name, server_ip, server_port, server_number, on_connect_click, on_delete_click):
+    def __init__(self, server_name, server_ip, server_port, server_number, on_connect_click, on_delete_click, on_copy_click):
         """
         Args:
             server_name (str): The name of the server to display.
@@ -21,6 +21,7 @@ class ServerCard(ft.Container):
             server_number (int): The index of the server in the server list.
             on_connect_click (function): A callback function to call when the connect button is clicked, with server_ip and server_port as arguments.
             on_delete_click (function): A callback function to call when the delete button is clicked, with server_number as an argument.
+            on_copy_click (function): A callback function to call when the copy button is clicked, with server_ip and server_port as arguments.
         """
         super().__init__()
         self.padding = 10
@@ -31,7 +32,10 @@ class ServerCard(ft.Container):
             controls =[
                 ft.Column([
                     ft.Text(server_name, size=18, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY_CONTAINER),
-                    ft.Text(f"{server_ip}:{server_port}", size=14, color=ft.Colors.ON_PRIMARY_CONTAINER)
+                    ft.Row([
+                        ft.Text(f"{server_ip}:{server_port}", size=14, color=ft.Colors.ON_PRIMARY_CONTAINER),
+                        ft.IconButton(ft.Icons.COPY, icon_size = 14, icon_color=ft.Colors.ON_PRIMARY_CONTAINER, on_click=lambda e: on_copy_click(server_ip, server_port, e))
+                    ], spacing=0)
                 ], spacing=5, expand=True),
                 ft.Button(
                     "Connect",
@@ -141,8 +145,12 @@ class MessageContainer(ft.Container):
         )
         self.url_launcher = ft.UrlLauncher() # UrlLauncher instance to handle link taps in messages
 
-    async def update_interface(self):
+    async def update_interface(self, element = None, remove = False):
         """Helper method to update the interface asynchronously."""
+        if element:
+            if remove and element in self.content.controls:
+                self.content.controls.remove(element)
+            else: self.content.controls.append(element)
         self.update()
     
     def add_message(self, sender, content, page):
@@ -164,8 +172,7 @@ class MessageContainer(ft.Container):
             border_radius=5,
             padding=10
         )
-        self.content.controls.append(message_control)
-        page.run_task(self.update_interface)
+        page.run_task(self.update_interface, message_control) # Update the interface to show the new message
     
     def add_notification(self, content, page):
         """Adds a notification message to the message list."""
@@ -175,8 +182,7 @@ class MessageContainer(ft.Container):
             border_radius=5,
             padding=10
         )
-        self.content.controls.append(notification_control)
-        page.run_task(self.update_interface)
+        page.run_task(self.update_interface, notification_control)
     
     def add_file_notice(self, sender, filename, page):
         """Adds a file notice message to the message list."""
@@ -235,8 +241,7 @@ class MessageContainer(ft.Container):
             border_radius=5,
             padding=10
         )
-        self.content.controls.append(file_notice_control)
-        page.run_task(self.update_interface)
+        page.run_task(self.update_interface, file_notice_control) # Update the interface to show the file notice message
     
     def add_file_upload(self, page):
         """
@@ -253,8 +258,7 @@ class MessageContainer(ft.Container):
             border_radius=5,
             padding=10
         )
-        self.content.controls.append(file_upload_control)
-        page.run_task(self.update_interface)
+        page.run_task(self.update_interface, file_upload_control) # Update the interface to show the file upload notice
 
         def upload_file(filepath):
             """
@@ -270,7 +274,7 @@ class MessageContainer(ft.Container):
             type = result.get("type", "unknown_error")
 
             if type == "success":
-                self.content.controls.remove(file_upload_control) # Remove the file upload notice from the message list after successful upload
+                page.run_task(self.update_interface, file_upload_control, remove=True) # Remove the file upload notice from the message list after successful upload
             else:
                 error_message = "Unknown error."
                 if type == "not_connected":
@@ -286,7 +290,7 @@ class MessageContainer(ft.Container):
                 file_upload_control.content.controls = [
                     ft.Text(f"Error uploading file: {error_message}", size=14, color=ft.Colors.ERROR)
                 ]
-            page.run_task(self.update_interface)
+                page.run_task(self.update_interface)
         
         file_picker = ft.FilePicker()
         async def pick_file():
@@ -295,9 +299,7 @@ class MessageContainer(ft.Container):
                 threading.Thread(target=upload_file, args=(path[0].path,), daemon=True).start() # Start a thread to upload the file to the server
                 file_upload_control.content.controls[0].value = f"Uploading file: {os.path.basename(path[0].path)}"
             except:
-                self.content.controls.remove(file_upload_control) # Remove the file upload notice if no file was selected
-                page.run_task(self.update_interface)
-        
+                page.run_task(self.update_interface, file_upload_control, remove=True) # Remove the file upload notice if no file was selected
         page.run_task(pick_file)
 
 class UserListContainer(ft.Container):
@@ -318,7 +320,7 @@ class UserListContainer(ft.Container):
     
     def update_user_list(self, user_list, page):
         """Updates the user list display with the current list of connected users."""
-        self.content.controls.clear()
+        new_controls = []
         for user in user_list:
             user_control = ft.Container(
                 content=ft.Text(user, size=14, color=ft.Colors.ON_SECONDARY_CONTAINER),
@@ -326,11 +328,13 @@ class UserListContainer(ft.Container):
                 border_radius=5,
                 padding=10
             )
-            self.content.controls.append(user_control)
+            new_controls.append(user_control)
         async def update_interface():
             """Updates the interface to show the new user list."""
+            self.content.controls.clear()
+            self.content.controls.extend(new_controls)
             self.update()
-        page.run_task(update_interface)
+        page.run_task(update_interface) # Update the interface to show the new user list
 
 def clear_backend_callbacks():
     """Clears the backend callbacks to prevent unwanted calls after disconnection."""
@@ -419,6 +423,16 @@ def main(page: ft.Page):
     global server_list
     global config
 
+    def copy_details(server_ip, server_port, e = None):
+        """Copies the server details to the clipboard when the copy button is clicked and shows a notification."""
+        text = f"{server_ip}:{server_port}"
+        async def copy_to_clipboard():
+            await ft.Clipboard().set(text)
+        page.run_task(copy_to_clipboard) # Copy the server details to the clipboard
+        page.show_dialog(
+            ft.SnackBar(ft.Text(value = "Server ip:port copied to clipboard", color=ft.Colors.ON_PRIMARY_CONTAINER), bgcolor=ft.Colors.PRIMARY_CONTAINER, duration=2000)
+        )
+
     def show_loading_dialog(e = None, message = "Loading..."):
         """
         Shows a loading dialog with a message when called.
@@ -477,7 +491,7 @@ def main(page: ft.Page):
         """
         page.controls.clear() # Clear the current screen
         close_loading_dialog() # Close any loading dialog that might be open
-        page.window.width = 400
+        page.window.width = 420
         page.window.height = 600
         page.window.icon = os.path.join(get_base_path(), "assets", "icon_transparent.ico")
         # Custom app bar with minimize, maximize, and close buttons
@@ -809,6 +823,13 @@ def main(page: ft.Page):
                         bgcolor=ft.Colors.PRIMARY_CONTAINER,
                         color=ft.Colors.ON_PRIMARY_CONTAINER,
                     ),
+                    # Copy server details button
+                    ft.IconButton(
+                        ft.Icons.COPY,
+                        on_click=lambda e: copy_details(server_ip, server_port, e),
+                        icon_color=ft.Colors.ON_PRIMARY_CONTAINER,
+                        bgcolor=ft.Colors.PRIMARY_CONTAINER,
+                        icon_size=18),
                     # Title
                     ft.Text(f"Whatsapp 3 - Connected to {server_name}" , size=20, weight=ft.FontWeight.BOLD, color=ft.Colors.ON_PRIMARY, expand=True, text_align=ft.TextAlign.CENTER),
                     # Window control buttons
@@ -915,7 +936,7 @@ def main(page: ft.Page):
                 ft.Image(src="assets/logo.png", width=80, height=80)
             ], height=100, margin=10),
             ft.ListView(
-                controls=[ServerCard(server[2], server[0], server[1], i, navigate_to_chat_screen, delete_server) for i, server in enumerate(server_list)],
+                controls=[ServerCard(server[2], server[0], server[1], i, navigate_to_chat_screen, delete_server, copy_details) for i, server in enumerate(server_list)],
                 spacing=10,
                 padding=10,
                 scroll= ft.ScrollMode.AUTO,

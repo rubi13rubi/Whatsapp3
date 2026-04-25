@@ -270,6 +270,20 @@ class Whatsapp3Client:
             except Exception as e: pass #print("Error playing voice data: " + str(e))
         #print("Voice chat ended")
 
+    def _apply_gain(self, audio_frame):
+        """
+        Applies the specified gain to the given audio frame.
+        Args:
+            audio_frame (bytes): The raw audio frame data in bytes.
+        """
+        if self.gain == 1.0:
+            return audio_frame
+        # Convert to float to avoid overflow while applying gain, then convert back to int16
+        audio_float = np.frombuffer(audio_frame, dtype=np.int16).astype(np.float32)
+        audio_amplified = audio_float * self.gain
+        audio_clipped = np.clip(audio_amplified, -32768, 32767)
+        return audio_clipped.astype(np.int16).tobytes()
+
     def _voice_send_loop(self):
         """
         Sends audio frames from the interface to the server.
@@ -279,7 +293,7 @@ class Whatsapp3Client:
         while self.voice_enabled and self.running:
             try:
                 frame = self.audioqueue.get(timeout = 1) # Get raw audio frame from interface, with timeout to allow periodic checks of the running flag
-                frame = (np.frombuffer(frame, np.int16) * self.gain).astype(np.int16).tobytes() # Apply gain
+                frame = self._apply_gain(frame) # Apply gain to the audio frame before sending
                 if  not self.muted:
                     if self.noise_suppressor:
                         frame = self._remove_noise(frame)
@@ -311,13 +325,11 @@ class Whatsapp3Client:
     
     def change_gain(self, volumevalue):
         """
-        Changes the gain for outgoing voice data, given a volume value.
-        The value is converted from logarithmic scale to linear gain.
+        Changes the linear gain for outgoing voice data, given a volume value.
         Args:
-            volumevalue (float): The volume value in logarithmic scale, where 1 is the default level and 0 is silence.
+            volumevalue (float): The volume value given by the user.
         """
-        if volumevalue <= 0: self.gain = 0
-        else: self.gain = pow(10, (volumevalue - 1) * 2) # Convert from logarithmic scale to linear gain
+        self.gain = volumevalue ** 2
         
 
     def _receive_loop(self):

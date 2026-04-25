@@ -510,9 +510,8 @@ def mix_and_send_voice():
                         others_sum = total_sum - client_sum # substract client's own frames from total sum
                     else:
                         others_sum = total_sum # if there are no frames from this client, send the total sum
-                    # normalize and clip to int16 range
-                    mixed = (others_sum // n_other)
-                    mixed = np.clip(mixed, -32768, 32767).astype(np.int16).tobytes()
+                    # clip to int16 range
+                    mixed = np.clip(others_sum, -32768, 32767).astype(np.int16).tobytes()
                     # encode and send
                     try:
                         encoded_data = encoders[addr].encode(mixed, FRAME_SIZE)
