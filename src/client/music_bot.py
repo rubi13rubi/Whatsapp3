@@ -5,6 +5,7 @@ import subprocess
 import threading
 import queue
 import time
+import os
 
 def get_direct_url(video_url):
     """
@@ -210,11 +211,24 @@ def on_message(sender, message):
         except (ValueError, IndexError):
             client_backend.send_chat_message("Invalid volume command. Please specify a value between 0 and 2.")
     elif message == "!help":
-        client_backend.send_chat_message("Available commands:")
-        client_backend.send_chat_message("!play <YouTube URL or search query> - Play music from YouTube. You can provide a direct URL or a search query.")
-        client_backend.send_chat_message("!stop - Stop the current music playback.")
-        client_backend.send_chat_message("!pause - Pause or resume the current music playback.")
-        client_backend.send_chat_message("!volume <value> - Set the volume of the music playback (0.0 to 2.0).")
+        client_backend.send_chat_message("# Available commands: \n" \
+            "- **!play** <YouTube URL or search query> - Play music from YouTube. You can provide a direct URL or a search query.\n" \
+            "- **!stop** - Stop the current music playback.\n" \
+            "- **!pause** - Pause or resume the current music playback.\n" \
+            "- **!volume** <value> - Set the volume of the music playback (0.0 to 2.0).")
+
+def on_disconnect(reason, exception):
+    """
+    Callback function that is called when the client disconnects from the server.
+    It can be used to perform any necessary cleanup.
+    """
+    print("Unexpectedly disconnected from server.")
+    if reason:
+        print("Reason: ", reason)
+        if exception: print("Exception: ", exception)
+    print("Exiting music bot. Goodbye!")
+    os._exit(1)
+
 print("Loading url cache...")
 try:
     with open("url_cache.json", "r") as f:
@@ -229,6 +243,7 @@ frame_queue = queue.Queue(maxsize=50) # Queue to hold audio frames for streaming
 pause_lock = threading.Lock() # Lock to manage pausing and resuming of music playback
 print("Setting up callbacks...")
 client_backend.on_chat_message = on_message
+client_backend.on_disconnect = on_disconnect
 IP = input("Enter the IP address of the server: ")
 PORT = int(input("Enter the port number of the server: "))
 USERNAME = "MusicBot"
@@ -241,5 +256,8 @@ print("Saving url cache...")
 with open("url_cache.json", "w") as f:
     json.dump(url_cache, f)
 print("Disconnecting from chat...")
+# Clear callbacks to avoid any potential issues with callbacks being called after disconnection
+client_backend.on_chat_message = None
+client_backend.on_disconnect = None
 client_backend.disconnect()
 print("Exiting music bot. Goodbye!")
